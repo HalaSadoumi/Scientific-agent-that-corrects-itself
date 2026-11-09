@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     minio_endpoint: str = "localhost:9000"
     minio_bucket: str = "uploads"
 
+    data_dir: str = "data"
+    max_upload_bytes: int = 20 * 1024 * 1024
+    chunk_size_chars: int = 1200
+    chunk_overlap_chars: int = 180
+
     @property
     def database_url(self) -> str:
         return (
