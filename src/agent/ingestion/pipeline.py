@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import html
 import re
+import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +21,7 @@ class ParsedFile:
     parser: str
     title: str
     pages: tuple[ExtractedPage, ...]
+    ocr_status: str = "not_needed"
 
 
 SUPPORTED_TYPES: dict[str, str] = {
@@ -35,23 +38,69 @@ SUPPORTED_TYPES: dict[str, str] = {
 }
 
 
-def parse_file(path: Path, filename: str, chunk_size: int, overlap: int) -> ParsedFile:
+def _ocr(image: bytes, language: str, enabled: bool) -> tuple[str, str]:
+    if not enabled:
+        return "", "disabled"
+    if shutil.which("tesseract") is None:
+        return "", "unavailable"
+    try:
+        result = subprocess.run(
+            ["tesseract", "stdin", "stdout", "-l", language],
+            input=image,
+            capture_output=True,
+            check=True,
+            timeout=90,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return "", "failed"
+    text = result.stdout.decode("utf-8", errors="replace").strip()
+    return text, "completed" if text else "no_text"
+
+
+def parse_file(
+    path: Path,
+    filename: str,
+    chunk_size: int,
+    overlap: int,
+    ocr_enabled: bool = True,
+    ocr_language: str = "eng",
+) -> ParsedFile:
     """Extract text while retaining page boundaries when the format has them."""
     suffix = Path(filename).suffix.lower()
     if suffix not in SUPPORTED_TYPES:
         raise ValueError(f"Unsupported file type: {suffix or '(no extension)'}")
     if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
-        return ParsedFile("image-storage-only", filename, ())
+        text, status = _ocr(path.read_bytes(), ocr_language, ocr_enabled)
+        return ParsedFile(
+            "tesseract" if status in {"completed", "no_text"} else "image-storage-only",
+            filename,
+            (ExtractedPage(1, text),) if text else (),
+            status,
+        )
     if suffix == ".pdf":
-        import fitz
+        import fitz  # type: ignore[import-untyped]
 
-        with fitz.open(path) as pdf:
-            pages = tuple(ExtractedPage(i + 1, page.get_text("text")) for i, page in enumerate(pdf))
-        return ParsedFile("pymupdf", filename, pages)
+        with fitz.open(str(path)) as pdf:
+            pages_list: list[ExtractedPage] = []
+            ocr_states: list[str] = []
+            used_ocr = False
+            for i, page in enumerate(pdf):
+                text = page.get_text("text").strip()
+                if not text:
+                    text, status = _ocr(page.get_pixmap(dpi=200).tobytes("png"),
+                                        ocr_language, ocr_enabled)
+                    ocr_states.append(status)
+                    used_ocr = used_ocr or status in {"completed", "no_text"}
+                pages_list.append(ExtractedPage(i + 1, text))
+        state = "completed" if "completed" in ocr_states else (
+            ocr_states[0] if ocr_states else "not_needed"
+        )
+        return ParsedFile("pymupdf+tesseract" if used_ocr else "pymupdf", filename,
+                          tuple(pages_list), state)
     if suffix == ".docx":
         from docx import Document as DocxDocument
 
-        document = DocxDocument(path)
+        document = DocxDocument(str(path))
         text = "\n".join(p.text for p in document.paragraphs if p.text.strip())
         for table in document.tables:
             table_text = "\n".join(
