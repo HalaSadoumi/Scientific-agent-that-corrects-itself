@@ -1,3 +1,4 @@
+name: astro-agent
 services:
   postgres:
     image: pgvector/pgvector:pg16
