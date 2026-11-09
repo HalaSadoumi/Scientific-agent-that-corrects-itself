@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+# local data volumes and uploads
+data/
+# never commit real documents or patient/private files
+tests/fixtures/*.pdf
+tests/fixtures/*.png
+tests/fixtures/*.jpg
+!tests/fixtures/.gitkeep
