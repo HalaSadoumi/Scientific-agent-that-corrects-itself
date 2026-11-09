@@ -1,1 +1,1 @@
-# Medical-Agent-That-Corrects-Itself
+# Scientific-Agent-That-Corrects-Itself
