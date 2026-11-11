@@ -12,8 +12,10 @@ from pydantic import BaseModel, Field
 
 from agent.config import get_settings
 from agent.generation import ModelServiceError, chat_json
-from agent.ingestion.pipeline import SUPPORTED_TYPES, chunk_pages, parse_file
+from agent.ingestion.pipeline import SUPPORTED_TYPES, chunk_pages_with_metadata, parse_file
 from agent.retrieval.embeddings import EmbeddingServiceError, embed_texts
+from agent.retrieval.cache import get as get_cached, invalidate as invalidate_cache, put as cache_result
+from agent.retrieval.planning import plan_queries, rerank
 from agent.retrieval.scholar import ScholarServiceError, search_arxiv
 from agent.storage.catalog import Catalog, PostgresCatalog, get_catalog
 from agent.storage.objects import ObjectStore
@@ -31,6 +33,7 @@ class IngestedDocument(BaseModel):
     chunk_count: int
     text_extracted: bool
     ocr_status: str
+    source_tier: str = "t0_user"
 
 
 class IngestResponse(BaseModel):
@@ -132,15 +135,31 @@ def _query_embedding(query: str) -> list[float] | None:
 
 def _retrieve(session_id: UUID, query: str, limit: int) -> tuple[list[dict[str, Any]], str]:
     settings = get_settings()
-    vector = _query_embedding(query)
-    hits = _catalog().search(
-        session_id,
-        query,
-        limit,
-        query_embedding=vector,
-        semantic_weight=settings.semantic_weight,
-    )
-    return hits, "hybrid_rrf" if vector is not None else "sqlite_fts5_bm25"
+    cached = get_cached(session_id, query, limit)
+    if cached is not None:
+        return cached, "hybrid_rrf" if settings.embedding_api_base else "sqlite_fts5_bm25"
+    planned = plan_queries(query)
+    candidates: dict[tuple[str, int, int], dict[str, Any]] = {}
+    semantic_enabled = bool(settings.embedding_api_base)
+    for planned_query in planned:
+        vector = _query_embedding(planned_query)
+        hits = _catalog().search(
+            session_id,
+            planned_query,
+            max(limit * 4, 20),
+            query_embedding=vector,
+            semantic_weight=settings.semantic_weight,
+        )
+        for hit in hits:
+            key = (str(hit["document_id"]), hit["page"], hit["chunk_order"])
+            existing = candidates.get(key)
+            # Favor the highest base retrieval rank for duplicate passages.
+            if existing is None or hit["score"] > existing["score"]:
+                candidates[key] = hit
+    ranked = rerank(query, list(candidates.values()), limit)
+    cache_result(session_id, query, limit, ranked)
+    method = "hybrid_rrf" if semantic_enabled else "sqlite_fts5_bm25"
+    return ranked, method
 
 
 def _object_store() -> ObjectStore:
@@ -166,6 +185,7 @@ def health() -> dict[str, str]:
 async def enqueue_input_jobs(
     session_id: UUID,
     question: str | None = Form(default=None, max_length=20_000),
+    source_tier: Literal["t0_user", "t1_scholarly", "t2_reference", "t3_web"] = Form(default="t0_user"),
     files: list[UploadFile] | None = File(default=None),  # noqa: B008
 ) -> InputJobsResponse:
     """Store inputs and enqueue parsing so large ingestions do not block the request."""
@@ -191,6 +211,7 @@ async def enqueue_input_jobs(
             raise HTTPException(status_code=503, detail="Redis job queue is unavailable") from exc
         if question and question.strip():
             _catalog().add_prompt(session_id, question.strip(), datetime.now(UTC).isoformat())
+        invalidate_cache(session_id)
         for upload in files:
             filename = Path(upload.filename or "upload").name[:255]
             suffix = Path(filename).suffix.lower()
@@ -220,6 +241,7 @@ async def enqueue_input_jobs(
                     "mime_type": SUPPORTED_TYPES[suffix],
                     "sha256": sha256,
                     "storage_key": storage_key,
+                    "source_tier": source_tier,
                     "attempt": 1,
                 }
                 await redis.hset(
@@ -289,6 +311,7 @@ async def input_job_status(session_id: UUID, job_id: UUID) -> InputJobStatusResp
 async def ingest_inputs(
     session_id: UUID,
     question: str | None = Form(default=None, max_length=20_000),
+    source_tier: Literal["t0_user", "t1_scholarly", "t2_reference", "t3_web"] = Form(default="t0_user"),
     files: list[UploadFile] | None = File(default=None),  # noqa: B008
 ) -> IngestResponse:
     """Accept a question and uploaded evidence, persist originals, parse, and index text."""
@@ -339,12 +362,12 @@ async def ingest_inputs(
             raise HTTPException(
                 status_code=422, detail=f"Could not parse {filename}: {exc}"
             ) from exc
-        pieces = chunk_pages(parsed.pages, settings.chunk_size_chars, settings.chunk_overlap_chars)
+        pieces = chunk_pages_with_metadata(parsed.pages, settings.chunk_size_chars, settings.chunk_overlap_chars)
         vectors: list[list[float]] | None = None
         if pieces and settings.embedding_api_base:
             try:
                 vectors = embed_texts(
-                    [text for _, text in pieces],
+                    [piece.text for piece in pieces],
                     settings.embedding_api_base,
                     settings.embedding_api_key or "",
                     settings.embedding_model,
@@ -373,18 +396,22 @@ async def ingest_inputs(
             "storage_key": storage_key,
             "parser": parsed.parser, "page_count": len(parsed.pages),
             "created_at": datetime.now(UTC).isoformat(),
+            "source_tier": source_tier,
         }
         try:
             _catalog().add_document(
                 record,
                 [
                     {
-                        "page": page,
+                        "page": piece.page,
                         "order": i,
-                        "text": text,
+                        "text": piece.text,
+                        "start_offset": piece.start_offset,
+                        "end_offset": piece.end_offset,
+                        "kind": piece.kind,
                         "embedding": vectors[i] if vectors else None,
                     }
-                    for i, (page, text) in enumerate(pieces)
+                    for i, piece in enumerate(pieces)
                 ],
             )
         except Exception as exc:
@@ -394,11 +421,13 @@ async def ingest_inputs(
             ) from exc
         if getattr(settings, "object_storage_backend", "local") == "s3":
             file_path.unlink(missing_ok=True)
+        invalidate_cache(session_id)
         results.append(IngestedDocument(
             id=document_id, filename=filename, mime_type=mime_type, sha256=digest,
             parser=parsed.parser, page_count=len(parsed.pages), chunk_count=len(pieces),
             text_extracted=any(page.text.strip() for page in parsed.pages),
             ocr_status=parsed.ocr_status,
+            source_tier=source_tier,
         ))
     return IngestResponse(session_id=session_id, question=question.strip() if question else None,
                           documents=results)
@@ -454,7 +483,7 @@ def answer(session_id: UUID, request: AnswerRequest) -> AnswerResponse:
             "document_id": str(hit["document_id"]),
             "filename": hit["filename"],
             "page": hit["page"],
-            "source_tier": "t0_user",
+            "source_tier": hit.get("source_tier", "t0_user"),
             "sha256": hit["sha256"],
         }
         sources[source_id] = source
@@ -521,7 +550,8 @@ def answer(session_id: UUID, request: AnswerRequest) -> AnswerResponse:
             source_id = f"{hit['document_id']}:{hit['page']}:{hit['chunk_order']}"
             sources.setdefault(source_id, {
                 "document_id": str(hit["document_id"]), "filename": hit["filename"],
-                "page": hit["page"], "source_tier": "t0_user", "sha256": hit["sha256"],
+                "page": hit["page"], "source_tier": hit.get("source_tier", "t0_user"),
+                "sha256": hit["sha256"],
             })
             verification_evidence.append({"id": source_id, "text": hit["text"]})
         if request.include_scholarly:

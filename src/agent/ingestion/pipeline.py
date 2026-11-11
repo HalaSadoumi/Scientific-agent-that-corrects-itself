@@ -24,6 +24,15 @@ class ParsedFile:
     ocr_status: str = "not_needed"
 
 
+@dataclass(frozen=True)
+class TextChunk:
+    page: int
+    text: str
+    start_offset: int
+    end_offset: int
+    kind: str = "paragraph"
+
+
 SUPPORTED_TYPES: dict[str, str] = {
     ".pdf": "application/pdf",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -91,6 +100,38 @@ def parse_file(
                                         ocr_language, ocr_enabled)
                     ocr_states.append(status)
                     used_ocr = used_ocr or status in {"completed", "no_text"}
+                # OCR embedded figure regions when PyMuPDF exposes their image bytes.
+                # This extracts labels only; it does not interpret chart geometry or data.
+                if ocr_enabled:
+                    try:
+                        blocks = page.get_text("dict").get("blocks", [])
+                        for block in blocks:
+                            image_bytes = block.get("image") if block.get("type") == 1 else None
+                            if image_bytes:
+                                image_text, status = _ocr(image_bytes, ocr_language, True)
+                                ocr_states.append(status)
+                                if image_text:
+                                    text += f"\n[FIGURE OCR TEXT]\n{image_text}"
+                                    used_ocr = True
+                    except (AttributeError, RuntimeError, ValueError):
+                        pass
+                # Keep detected tables searchable with their row/column structure. PyMuPDF
+                # versions without find_tables still retain ordinary page text.
+                try:
+                    finder = getattr(page, "find_tables", None)
+                    if finder is not None:
+                        tables = finder().tables
+                        rendered = []
+                        for table in tables:
+                            rows = table.extract()
+                            if rows:
+                                rendered.append("\n[TABLE]\n" + "\n".join(
+                                    " | ".join((cell or "").strip() for cell in row)
+                                    for row in rows
+                                ) + "\n[/TABLE]")
+                        text = text + "\n" + "\n".join(rendered) if rendered else text
+                except Exception:
+                    pass
                 pages_list.append(ExtractedPage(i + 1, text))
         state = "completed" if "completed" in ocr_states else (
             ocr_states[0] if ocr_states else "not_needed"
@@ -106,7 +147,7 @@ def parse_file(
             table_text = "\n".join(
                 " | ".join(cell.text for cell in row.cells) for row in table.rows
             )
-            text += "\n" + table_text
+            text += "\n[TABLE]\n" + table_text + "\n[/TABLE]"
         return ParsedFile("python-docx", filename, (ExtractedPage(1, text),))
     raw = path.read_text(encoding="utf-8", errors="replace")
     if suffix in {".html", ".htm"}:
@@ -142,10 +183,12 @@ def parse_file(
                       (ExtractedPage(1, clean),))
 
 
-def chunk_pages(pages: tuple[ExtractedPage, ...], size: int, overlap: int) -> list[tuple[int, str]]:
+def chunk_pages_with_metadata(
+    pages: tuple[ExtractedPage, ...], size: int, overlap: int
+) -> list[TextChunk]:
     if size < 100 or overlap < 0 or overlap >= size:
         raise ValueError("chunk size must be at least 100 and overlap must be smaller than size")
-    chunks: list[tuple[int, str]] = []
+    chunks: list[TextChunk] = []
     for page in pages:
         text = re.sub(r"\s+", " ", page.text).strip()
         start = 0
@@ -157,8 +200,16 @@ def chunk_pages(pages: tuple[ExtractedPage, ...], size: int, overlap: int) -> li
                     end = boundary
             piece = text[start:end].strip()
             if piece:
-                chunks.append((page.number, piece))
+                is_table = "[TABLE]" in piece or " | " in piece
+                is_equation = bool(re.search(r"(?:[=<>≤≥±×÷∑∫√]|\\(?:frac|sum|int|sqrt))", piece))
+                kind = "table" if is_table else "equation" if is_equation else "paragraph"
+                chunks.append(TextChunk(page.number, piece, start, end, kind))
             if end >= len(text):
                 break
             start = max(start + 1, end - overlap)
     return chunks
+
+
+def chunk_pages(pages: tuple[ExtractedPage, ...], size: int, overlap: int) -> list[tuple[int, str]]:
+    """Compatibility helper returning page/text pairs."""
+    return [(chunk.page, chunk.text) for chunk in chunk_pages_with_metadata(pages, size, overlap)]

@@ -7,6 +7,7 @@ This repository implements a configurable evidence pipeline: **input → ingesti
 - Upload a question and PDF, DOCX, HTML, TXT, Markdown, or image files to a session.
 - Extract document text, preserve PDF page numbers, and use Tesseract OCR for images or textless PDF pages when Tesseract is installed.
 - Search evidence with SQLite FTS5 BM25; optionally add semantic embeddings and hybrid rank fusion through an explicitly configured OpenAI-compatible endpoint.
+- Plan focused query clauses, rerank by query coverage and caller-supplied source tier, and briefly cache session searches.
 - Select SQLite/local files for development or Postgres/pgvector plus Garage S3-compatible object storage for a service-backed setup.
 - Queue larger uploads through Redis Streams, run a worker with up to three attempts, and poll job status.
 - Search arXiv abstracts and request an answer composed from evidence, checked by a separately named verification model with a second retrieval pass. Generated citations are restricted to sources actually returned by retrieval, and the result is saved to the audit log.
@@ -60,6 +61,8 @@ curl.exe -X POST "http://127.0.0.1:8000/sessions/$session/input-jobs" `
 The queued response returns a job ID. Poll `GET /sessions/{session_id}/input-jobs/{job_id}` until the status is `completed` or `failed`.
 
 Search ingested passages with `GET /sessions/{session_id}/retrieve?q=stellar%20mass&limit=5`. Search public scholarly metadata with `GET /scholar/search?q=stellar%20mass`. Generate and verify a response with `POST /sessions/{session_id}/answer` and JSON such as `{"question":"What is the measured mass?","include_scholarly":false}`. Answer generation requires an LLM endpoint, an answer model, and a different `VERIFICATION_MODEL`.
+
+Uploads accept an optional multipart `source_tier` (`t0_user`, `t1_scholarly`, `t2_reference`, or `t3_web`; default `t0_user`). This label is caller-provided and is not independently verified. Chunks retain page-relative character offsets and a coarse content kind; DOCX and detectable PDF tables are indexed with row/cell separators. OCR can extract words from embedded PDF figure images when Tesseract is available, but does not interpret chart geometry or visual meaning.
 
 ## Optional integrations and data sharing
 

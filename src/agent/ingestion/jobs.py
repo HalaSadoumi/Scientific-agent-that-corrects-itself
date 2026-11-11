@@ -10,7 +10,7 @@ from typing import Any
 from uuid import UUID
 
 from agent.config import get_settings
-from agent.ingestion.pipeline import chunk_pages, parse_file
+from agent.ingestion.pipeline import chunk_pages_with_metadata, parse_file
 from agent.retrieval.embeddings import embed_texts
 from agent.storage.catalog import get_catalog
 from agent.storage.objects import ObjectStore
@@ -42,7 +42,7 @@ def process_input_job(payload: dict[str, Any]) -> dict[str, Any]:
             settings.ocr_enabled,
             settings.ocr_language,
         )
-    pieces = chunk_pages(parsed.pages, settings.chunk_size_chars, settings.chunk_overlap_chars)
+    pieces = chunk_pages_with_metadata(parsed.pages, settings.chunk_size_chars, settings.chunk_overlap_chars)
     vectors = None
     if pieces and settings.embedding_api_base:
         vectors = embed_texts(
@@ -64,15 +64,19 @@ def process_input_job(payload: dict[str, Any]) -> dict[str, Any]:
             "parser": parsed.parser,
             "page_count": len(parsed.pages),
             "created_at": datetime.now(UTC).isoformat(),
+            "source_tier": payload.get("source_tier", "t0_user"),
         },
         [
             {
-                "page": page,
+                "page": piece.page,
                 "order": i,
-                "text": text,
+                "text": piece.text,
+                "start_offset": piece.start_offset,
+                "end_offset": piece.end_offset,
+                "kind": piece.kind,
                 "embedding": vectors[i] if vectors else None,
             }
-            for i, (page, text) in enumerate(pieces)
+            for i, piece in enumerate(pieces)
         ],
     )
     return {
@@ -82,4 +86,5 @@ def process_input_job(payload: dict[str, Any]) -> dict[str, Any]:
         "chunk_count": len(pieces),
         "text_extracted": any(page.text.strip() for page in parsed.pages),
         "ocr_status": parsed.ocr_status,
+        "source_tier": payload.get("source_tier", "t0_user"),
     }
