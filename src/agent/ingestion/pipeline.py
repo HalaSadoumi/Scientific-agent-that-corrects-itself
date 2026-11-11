@@ -96,8 +96,9 @@ def parse_file(
             for i, page in enumerate(pdf):
                 text = page.get_text("text").strip()
                 if not text:
-                    text, status = _ocr(page.get_pixmap(dpi=200).tobytes("png"),
-                                        ocr_language, ocr_enabled)
+                    text, status = _ocr(
+                        page.get_pixmap(dpi=200).tobytes("png"), ocr_language, ocr_enabled
+                    )
                     ocr_states.append(status)
                     used_ocr = used_ocr or status in {"completed", "no_text"}
                 # OCR embedded figure regions when PyMuPDF exposes their image bytes.
@@ -125,19 +126,26 @@ def parse_file(
                         for table in tables:
                             rows = table.extract()
                             if rows:
-                                rendered.append("\n[TABLE]\n" + "\n".join(
-                                    " | ".join((cell or "").strip() for cell in row)
-                                    for row in rows
-                                ) + "\n[/TABLE]")
+                                rendered.append(
+                                    "\n[TABLE]\n"
+                                    + "\n".join(
+                                        " | ".join((cell or "").strip() for cell in row)
+                                        for row in rows
+                                    )
+                                    + "\n[/TABLE]"
+                                )
                         text = text + "\n" + "\n".join(rendered) if rendered else text
                 except Exception:
                     pass
                 pages_list.append(ExtractedPage(i + 1, text))
-        state = "completed" if "completed" in ocr_states else (
-            ocr_states[0] if ocr_states else "not_needed"
+        state = (
+            "completed"
+            if "completed" in ocr_states
+            else (ocr_states[0] if ocr_states else "not_needed")
         )
-        return ParsedFile("pymupdf+tesseract" if used_ocr else "pymupdf", filename,
-                          tuple(pages_list), state)
+        return ParsedFile(
+            "pymupdf+tesseract" if used_ocr else "pymupdf", filename, tuple(pages_list), state
+        )
     if suffix == ".docx":
         from docx import Document as DocxDocument
 
@@ -179,8 +187,11 @@ def parse_file(
         extractor.feed(raw)
         raw = html.unescape("".join(extractor.parts))
     clean = re.sub(r"[ \t]+", " ", raw)
-    return ParsedFile("html-parser" if suffix in {".html", ".htm"} else "utf8-text", filename,
-                      (ExtractedPage(1, clean),))
+    return ParsedFile(
+        "html-parser" if suffix in {".html", ".htm"} else "utf8-text",
+        filename,
+        (ExtractedPage(1, clean),),
+    )
 
 
 def chunk_pages_with_metadata(

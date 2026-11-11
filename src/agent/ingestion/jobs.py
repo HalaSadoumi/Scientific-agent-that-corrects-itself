@@ -21,8 +21,11 @@ def process_input_job(payload: dict[str, Any]) -> dict[str, Any]:
     contents = ObjectStore(
         backend=settings.object_storage_backend,
         data_dir=Path(settings.data_dir),
-        endpoint=(settings.s3_endpoint if "://" in settings.s3_endpoint
-                  else f"http://{settings.s3_endpoint}"),
+        endpoint=(
+            settings.s3_endpoint
+            if "://" in settings.s3_endpoint
+            else f"http://{settings.s3_endpoint}"
+        ),
         bucket=settings.s3_bucket,
         access_key=settings.s3_access_key,
         secret_key=settings.s3_secret_key,
@@ -42,7 +45,9 @@ def process_input_job(payload: dict[str, Any]) -> dict[str, Any]:
             settings.ocr_enabled,
             settings.ocr_language,
         )
-    pieces = chunk_pages_with_metadata(parsed.pages, settings.chunk_size_chars, settings.chunk_overlap_chars)
+    pieces = chunk_pages_with_metadata(
+        parsed.pages, settings.chunk_size_chars, settings.chunk_overlap_chars
+    )
     vectors = None
     if pieces and settings.embedding_api_base:
         vectors = embed_texts(

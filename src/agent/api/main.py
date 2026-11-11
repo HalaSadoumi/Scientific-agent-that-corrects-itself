@@ -13,8 +13,16 @@ from pydantic import BaseModel, Field
 from agent.config import get_settings
 from agent.generation import ModelServiceError, chat_json
 from agent.ingestion.pipeline import SUPPORTED_TYPES, chunk_pages_with_metadata, parse_file
+from agent.retrieval.cache import (
+    get as get_cached,
+)
+from agent.retrieval.cache import (
+    invalidate as invalidate_cache,
+)
+from agent.retrieval.cache import (
+    put as cache_result,
+)
 from agent.retrieval.embeddings import EmbeddingServiceError, embed_texts
-from agent.retrieval.cache import get as get_cached, invalidate as invalidate_cache, put as cache_result
 from agent.retrieval.planning import plan_queries, rerank
 from agent.retrieval.scholar import ScholarServiceError, search_arxiv
 from agent.storage.catalog import Catalog, PostgresCatalog, get_catalog
@@ -167,8 +175,11 @@ def _object_store() -> ObjectStore:
     return ObjectStore(
         backend=settings.object_storage_backend,
         data_dir=Path(settings.data_dir),
-        endpoint=(settings.s3_endpoint if "://" in settings.s3_endpoint
-                  else f"http://{settings.s3_endpoint}"),
+        endpoint=(
+            settings.s3_endpoint
+            if "://" in settings.s3_endpoint
+            else f"http://{settings.s3_endpoint}"
+        ),
         bucket=settings.s3_bucket,
         access_key=settings.s3_access_key,
         secret_key=settings.s3_secret_key,
@@ -185,7 +196,9 @@ def health() -> dict[str, str]:
 async def enqueue_input_jobs(
     session_id: UUID,
     question: str | None = Form(default=None, max_length=20_000),
-    source_tier: Literal["t0_user", "t1_scholarly", "t2_reference", "t3_web"] = Form(default="t0_user"),
+    source_tier: Literal["t0_user", "t1_scholarly", "t2_reference", "t3_web"] = Form(
+        default="t0_user"
+    ),
     files: list[UploadFile] | None = File(default=None),  # noqa: B008
 ) -> InputJobsResponse:
     """Store inputs and enqueue parsing so large ingestions do not block the request."""
@@ -247,8 +260,10 @@ async def enqueue_input_jobs(
                 await redis.hset(
                     f"ingestion:job:{job_id}",
                     mapping={
-                        "session_id": str(session_id), "status": "queued",
-                        "filename": filename, "attempts": "0",
+                        "session_id": str(session_id),
+                        "status": "queued",
+                        "filename": filename,
+                        "attempts": "0",
                     },
                 )
                 await redis.expire(f"ingestion:job:{job_id}", 7 * 24 * 60 * 60)
@@ -311,7 +326,9 @@ async def input_job_status(session_id: UUID, job_id: UUID) -> InputJobStatusResp
 async def ingest_inputs(
     session_id: UUID,
     question: str | None = Form(default=None, max_length=20_000),
-    source_tier: Literal["t0_user", "t1_scholarly", "t2_reference", "t3_web"] = Form(default="t0_user"),
+    source_tier: Literal["t0_user", "t1_scholarly", "t2_reference", "t3_web"] = Form(
+        default="t0_user"
+    ),
     files: list[UploadFile] | None = File(default=None),  # noqa: B008
 ) -> IngestResponse:
     """Accept a question and uploaded evidence, persist originals, parse, and index text."""
@@ -362,7 +379,9 @@ async def ingest_inputs(
             raise HTTPException(
                 status_code=422, detail=f"Could not parse {filename}: {exc}"
             ) from exc
-        pieces = chunk_pages_with_metadata(parsed.pages, settings.chunk_size_chars, settings.chunk_overlap_chars)
+        pieces = chunk_pages_with_metadata(
+            parsed.pages, settings.chunk_size_chars, settings.chunk_overlap_chars
+        )
         vectors: list[list[float]] | None = None
         if pieces and settings.embedding_api_base:
             try:
@@ -380,8 +399,11 @@ async def ingest_inputs(
             storage_key = ObjectStore(
                 backend=getattr(settings, "object_storage_backend", "local"),
                 data_dir=Path(settings.data_dir),
-                endpoint=(settings.s3_endpoint if "://" in settings.s3_endpoint
-                          else f"http://{settings.s3_endpoint}"),
+                endpoint=(
+                    settings.s3_endpoint
+                    if "://" in settings.s3_endpoint
+                    else f"http://{settings.s3_endpoint}"
+                ),
                 bucket=settings.s3_bucket,
                 access_key=settings.s3_access_key,
                 secret_key=settings.s3_secret_key,
@@ -391,10 +413,14 @@ async def ingest_inputs(
             file_path.unlink(missing_ok=True)
             raise HTTPException(status_code=503, detail="Could not save the original file") from exc
         record = {
-            "id": str(document_id), "session_id": str(session_id), "filename": filename,
-            "mime_type": mime_type, "sha256": digest,
+            "id": str(document_id),
+            "session_id": str(session_id),
+            "filename": filename,
+            "mime_type": mime_type,
+            "sha256": digest,
             "storage_key": storage_key,
-            "parser": parsed.parser, "page_count": len(parsed.pages),
+            "parser": parsed.parser,
+            "page_count": len(parsed.pages),
             "created_at": datetime.now(UTC).isoformat(),
             "source_tier": source_tier,
         }
@@ -422,15 +448,23 @@ async def ingest_inputs(
         if getattr(settings, "object_storage_backend", "local") == "s3":
             file_path.unlink(missing_ok=True)
         invalidate_cache(session_id)
-        results.append(IngestedDocument(
-            id=document_id, filename=filename, mime_type=mime_type, sha256=digest,
-            parser=parsed.parser, page_count=len(parsed.pages), chunk_count=len(pieces),
-            text_extracted=any(page.text.strip() for page in parsed.pages),
-            ocr_status=parsed.ocr_status,
-            source_tier=source_tier,
-        ))
-    return IngestResponse(session_id=session_id, question=question.strip() if question else None,
-                          documents=results)
+        results.append(
+            IngestedDocument(
+                id=document_id,
+                filename=filename,
+                mime_type=mime_type,
+                sha256=digest,
+                parser=parsed.parser,
+                page_count=len(parsed.pages),
+                chunk_count=len(pieces),
+                text_extracted=any(page.text.strip() for page in parsed.pages),
+                ocr_status=parsed.ocr_status,
+                source_tier=source_tier,
+            )
+        )
+    return IngestResponse(
+        session_id=session_id, question=question.strip() if question else None, documents=results
+    )
 
 
 @app.get("/sessions/{session_id}/retrieve", response_model=RetrievalResponse)
@@ -501,10 +535,12 @@ def answer(session_id: UUID, request: AnswerRequest) -> AnswerResponse:
                 "source_tier": result["source_tier"],
                 "updated": result["updated"],
             }
-            evidence.append({
-                "id": source_id,
-                "text": f"{result['title']}\n{result['abstract']}",
-            })
+            evidence.append(
+                {
+                    "id": source_id,
+                    "text": f"{result['title']}\n{result['abstract']}",
+                }
+            )
     if not evidence:
         raise HTTPException(
             status_code=422,
@@ -548,11 +584,16 @@ def answer(session_id: UUID, request: AnswerRequest) -> AnswerResponse:
         verification_evidence: list[dict[str, str]] = []
         for hit in claim_hits:
             source_id = f"{hit['document_id']}:{hit['page']}:{hit['chunk_order']}"
-            sources.setdefault(source_id, {
-                "document_id": str(hit["document_id"]), "filename": hit["filename"],
-                "page": hit["page"], "source_tier": hit.get("source_tier", "t0_user"),
-                "sha256": hit["sha256"],
-            })
+            sources.setdefault(
+                source_id,
+                {
+                    "document_id": str(hit["document_id"]),
+                    "filename": hit["filename"],
+                    "page": hit["page"],
+                    "source_tier": hit.get("source_tier", "t0_user"),
+                    "sha256": hit["sha256"],
+                },
+            )
             verification_evidence.append({"id": source_id, "text": hit["text"]})
         if request.include_scholarly:
             try:
@@ -561,13 +602,18 @@ def answer(session_id: UUID, request: AnswerRequest) -> AnswerResponse:
                 claim_sources = []
             for result in claim_sources:
                 source_id = f"arxiv:{result['id']}"
-                sources.setdefault(source_id, {
-                    "title": result["title"], "url": result["id"],
-                    "source_tier": result["source_tier"], "updated": result["updated"],
-                })
-                verification_evidence.append({
-                    "id": source_id, "text": f"{result['title']}\n{result['abstract']}"
-                })
+                sources.setdefault(
+                    source_id,
+                    {
+                        "title": result["title"],
+                        "url": result["id"],
+                        "source_tier": result["source_tier"],
+                        "updated": result["updated"],
+                    },
+                )
+                verification_evidence.append(
+                    {"id": source_id, "text": f"{result['title']}\n{result['abstract']}"}
+                )
         try:
             verdict_data = chat_json(
                 api_base=settings.llm_api_base,
@@ -588,25 +634,28 @@ def answer(session_id: UUID, request: AnswerRequest) -> AnswerResponse:
             ) from exc
         allowed = {item["id"] for item in verification_evidence}
         verification_citations = [
-            value for value in verdict_data.get("citations", [])
+            value
+            for value in verdict_data.get("citations", [])
             if isinstance(value, str) and value in allowed
         ]
         verdict = verdict_data.get("verdict")
         if verdict in {"supported", "contradicted", "uncertain"}:
-            typed_verdict: Literal[
-                "supported", "contradicted", "uncertain", "unsupported"
-            ] = verdict
+            typed_verdict: Literal["supported", "contradicted", "uncertain", "unsupported"] = (
+                verdict
+            )
         else:
             typed_verdict = "uncertain"
         if not verification_citations:
             typed_verdict = "unsupported" if not citations else "uncertain"
-        checked.append(AnswerSegment(
-            text=text,
-            citations=citations,
-            verification_citations=verification_citations,
-            verdict=typed_verdict,
-            verification_notes=str(verdict_data.get("notes", ""))[:1000],
-        ))
+        checked.append(
+            AnswerSegment(
+                text=text,
+                citations=citations,
+                verification_citations=verification_citations,
+                verdict=typed_verdict,
+                verification_notes=str(verdict_data.get("notes", ""))[:1000],
+            )
+        )
 
     if not checked:
         raise HTTPException(status_code=502, detail="The answer model returned no usable claims")

@@ -65,15 +65,21 @@ class Catalog:
             if "end_offset" not in columns:
                 db.execute("ALTER TABLE chunks ADD COLUMN end_offset INTEGER NOT NULL DEFAULT 0")
             if "chunk_kind" not in columns:
-                db.execute("ALTER TABLE chunks ADD COLUMN chunk_kind TEXT NOT NULL DEFAULT 'paragraph'")
+                db.execute(
+                    "ALTER TABLE chunks ADD COLUMN chunk_kind TEXT NOT NULL DEFAULT 'paragraph'"
+                )
             document_columns = {row["name"] for row in db.execute("PRAGMA table_info(documents)")}
             if "source_tier" not in document_columns:
-                db.execute("ALTER TABLE documents ADD COLUMN source_tier TEXT NOT NULL DEFAULT 't0_user'")
+                db.execute(
+                    "ALTER TABLE documents ADD COLUMN source_tier TEXT NOT NULL DEFAULT 't0_user'"
+                )
 
     def add_prompt(self, session_id: UUID, text: str, created_at: str) -> None:
         with self.connect() as db:
-            db.execute("INSERT INTO prompts VALUES (?, ?, ?, ?)",
-                       (str(uuid4()), str(session_id), text, created_at))
+            db.execute(
+                "INSERT INTO prompts VALUES (?, ?, ?, ?)",
+                (str(uuid4()), str(session_id), text, created_at),
+            )
 
     def add_audit(
         self, session_id: UUID, event: str, details: dict[str, Any], created_at: str
@@ -115,10 +121,18 @@ class Catalog:
                 tuple(
                     document[key]
                     for key in (
-                        "id", "session_id", "filename", "mime_type", "sha256",
-                        "storage_key", "parser", "page_count", "created_at",
+                        "id",
+                        "session_id",
+                        "filename",
+                        "mime_type",
+                        "sha256",
+                        "storage_key",
+                        "parser",
+                        "page_count",
+                        "created_at",
                     )
-                ) + (document.get("source_tier", "t0_user"),),
+                )
+                + (document.get("source_tier", "t0_user"),),
             )
             db.executemany(
                 """INSERT OR IGNORE INTO chunks
@@ -127,9 +141,15 @@ class Catalog:
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [
                     (
-                        document["id"], document["session_id"], c["page"], c["order"],
-                        c["text"], json.dumps(c["embedding"]) if c.get("embedding") else None,
-                        c.get("start_offset", 0), c.get("end_offset", 0), c.get("kind", "paragraph"),
+                        document["id"],
+                        document["session_id"],
+                        c["page"],
+                        c["order"],
+                        c["text"],
+                        json.dumps(c["embedding"]) if c.get("embedding") else None,
+                        c.get("start_offset", 0),
+                        c.get("end_offset", 0),
+                        c.get("kind", "paragraph"),
                     )
                     for c in chunks
                 ],
@@ -149,24 +169,32 @@ class Catalog:
             return []
         match = " OR ".join('"' + term.replace('"', '""') + '"' for term in terms)
         with self.connect() as db:
-            lexical_rows = db.execute(
-                """SELECT c.id, c.document_id, d.filename, d.sha256, d.storage_key, d.parser,
+            lexical_rows = (
+                db.execute(
+                    """SELECT c.id, c.document_id, d.filename, d.sha256, d.storage_key, d.parser,
                           d.source_tier, c.page, c.chunk_order, c.text,
                           c.start_offset, c.end_offset, c.chunk_kind, bm25(chunk_search) AS score
                    FROM chunk_search JOIN chunks c ON c.id = chunk_search.rowid
                    JOIN documents d ON d.id = c.document_id
                    WHERE chunk_search MATCH ? AND c.session_id = ?
                    ORDER BY score LIMIT ?""",
-                (match, str(session_id), max(limit * 10, 50)),
-            ).fetchall() if terms else []
-            semantic_rows = db.execute(
-                """SELECT c.id, c.document_id, d.filename, d.sha256, d.storage_key, d.parser,
+                    (match, str(session_id), max(limit * 10, 50)),
+                ).fetchall()
+                if terms
+                else []
+            )
+            semantic_rows = (
+                db.execute(
+                    """SELECT c.id, c.document_id, d.filename, d.sha256, d.storage_key, d.parser,
                           d.source_tier, c.page, c.chunk_order, c.text,
                           c.start_offset, c.end_offset, c.chunk_kind, c.embedding
                    FROM chunks c JOIN documents d ON d.id = c.document_id
                    WHERE c.session_id = ? AND c.embedding IS NOT NULL""",
-                (str(session_id),),
-            ).fetchall() if query_embedding is not None else []
+                    (str(session_id),),
+                ).fetchall()
+                if query_embedding is not None
+                else []
+            )
 
         candidates: dict[int, dict[str, Any]] = {}
         lexical_rank: dict[int, int] = {}
@@ -189,7 +217,7 @@ class Catalog:
                 similarity = dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
                 similarities.append((similarity, row))
             similarities.sort(key=lambda pair: pair[0], reverse=True)
-            for rank, (_, row) in enumerate(similarities[:max(limit * 10, 50)], start=1):
+            for rank, (_, row) in enumerate(similarities[: max(limit * 10, 50)], start=1):
                 candidate = dict(row)
                 candidate.pop("embedding", None)
                 candidates[row["id"]] = candidate
@@ -232,7 +260,10 @@ class PostgresCatalog:
                     created_at TIMESTAMPTZ NOT NULL, source_tier TEXT NOT NULL DEFAULT 't0_user'
                 )"""
             )
-            db.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_tier TEXT NOT NULL DEFAULT 't0_user'")
+            db.execute(
+                "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_tier TEXT NOT NULL "
+                "DEFAULT 't0_user'"
+            )
             db.execute(
                 """CREATE TABLE IF NOT EXISTS prompts (
                     id UUID PRIMARY KEY, session_id UUID NOT NULL,
@@ -256,12 +287,18 @@ class PostgresCatalog:
                         (to_tsvector('english', text)) STORED
                 )"""
             )
-            db.execute("ALTER TABLE chunks ADD COLUMN IF NOT EXISTS start_offset INTEGER NOT NULL DEFAULT 0")
-            db.execute("ALTER TABLE chunks ADD COLUMN IF NOT EXISTS end_offset INTEGER NOT NULL DEFAULT 0")
-            db.execute("ALTER TABLE chunks ADD COLUMN IF NOT EXISTS chunk_kind TEXT NOT NULL DEFAULT 'paragraph'")
             db.execute(
-                "CREATE INDEX IF NOT EXISTS chunks_session_idx ON chunks(session_id)"
+                "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS start_offset INTEGER NOT NULL "
+                "DEFAULT 0"
             )
+            db.execute(
+                "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS end_offset INTEGER NOT NULL DEFAULT 0"
+            )
+            db.execute(
+                "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS chunk_kind TEXT NOT NULL "
+                "DEFAULT 'paragraph'"
+            )
+            db.execute("CREATE INDEX IF NOT EXISTS chunks_session_idx ON chunks(session_id)")
             db.execute(
                 """CREATE UNIQUE INDEX IF NOT EXISTS chunks_document_order_idx
                    ON chunks(document_id, chunk_order)"""
@@ -313,9 +350,15 @@ class PostgresCatalog:
                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                    ON CONFLICT (id) DO NOTHING""",
                 (
-                    document["id"], document["session_id"], document["filename"],
-                    document["mime_type"], document["sha256"], document["storage_key"],
-                    document["parser"], document["page_count"], document["created_at"],
+                    document["id"],
+                    document["session_id"],
+                    document["filename"],
+                    document["mime_type"],
+                    document["sha256"],
+                    document["storage_key"],
+                    document["parser"],
+                    document["page_count"],
+                    document["created_at"],
                     document.get("source_tier", "t0_user"),
                 ),
             )
@@ -329,9 +372,15 @@ class PostgresCatalog:
                        VALUES (%s, %s, %s, %s, %s, %s::vector, %s, %s, %s)
                        ON CONFLICT (document_id, chunk_order) DO NOTHING""",
                     (
-                        document["id"], document["session_id"], chunk["page"],
-                        chunk["order"], chunk["text"], vector_text,
-                        chunk.get("start_offset", 0), chunk.get("end_offset", 0), chunk.get("kind", "paragraph"),
+                        document["id"],
+                        document["session_id"],
+                        chunk["page"],
+                        chunk["order"],
+                        chunk["text"],
+                        vector_text,
+                        chunk.get("start_offset", 0),
+                        chunk.get("end_offset", 0),
+                        chunk.get("kind", "paragraph"),
                     ),
                 )
 
