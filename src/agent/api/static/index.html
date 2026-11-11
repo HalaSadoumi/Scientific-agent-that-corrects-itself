@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scientific Evidence Test Bench</title>
+  <style>
+    :root { color-scheme: light; --ink:#17233b; --muted:#64718a; --line:#dce3ed; --blue:#1769aa; --pale:#f3f7fb; --green:#146c52; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:#edf2f7; color:var(--ink); font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    main { max-width:1000px; margin:36px auto; padding:0 20px 48px; }
+    header { margin-bottom:24px; }
+    .eyebrow { color:var(--blue); font-size:12px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+    h1 { margin:6px 0 4px; font-size:clamp(28px,4vw,38px); line-height:1.15; }
+    .intro { max-width:680px; color:var(--muted); margin:8px 0 0; }
+    .session { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:18px; color:var(--muted); font-size:13px; }
+    code { color:#34425e; background:#e6edf5; padding:4px 8px; border-radius:6px; overflow-wrap:anywhere; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:start; }
+    section { border:1px solid var(--line); border-radius:14px; background:white; padding:22px; box-shadow:0 6px 24px #1e35500a; }
+    h2 { margin:0 0 5px; font-size:20px; }
+    .sub { color:var(--muted); font-size:14px; margin:0 0 18px; }
+    label { display:block; font-size:13px; font-weight:700; margin:14px 0 6px; }
+    input[type=text], textarea, select { width:100%; border:1px solid #c8d2df; border-radius:8px; padding:10px 11px; color:var(--ink); font:inherit; background:white; }
+    textarea { resize:vertical; min-height:76px; }
+    input:focus, textarea:focus, select:focus { outline:3px solid #1769aa26; border-color:var(--blue); }
+    .filebox { display:block; padding:18px; border:1px dashed #9aacc1; border-radius:10px; background:var(--pale); cursor:pointer; }
+    .filebox:hover { border-color:var(--blue); }
+    input[type=file] { display:block; width:100%; margin-top:8px; font:14px system-ui,sans-serif; }
+    .hint { margin:8px 0 0; color:var(--muted); font-size:12px; }
+    button { border:0; border-radius:8px; padding:10px 16px; background:var(--blue); color:white; font:700 14px system-ui,sans-serif; cursor:pointer; }
+    button:hover { background:#105487; }
+    button:disabled { opacity:.55; cursor:wait; }
+    .secondary { color:var(--blue); background:transparent; padding:5px 8px; }
+    .secondary:hover { background:#e6f1fa; }
+    .actions { display:flex; align-items:center; gap:12px; margin-top:18px; }
+    .status { min-height:22px; margin:14px 0 0; color:var(--muted); font-size:13px; }
+    .status.error { color:#a12c2c; }
+    .status.ok { color:var(--green); }
+    .results { margin-top:20px; }
+    .hit { margin-top:12px; padding:15px; border:1px solid var(--line); border-radius:10px; background:#fbfcfe; }
+    .hit-head { display:flex; justify-content:space-between; gap:10px; color:var(--muted); font-size:12px; }
+    .badge { display:inline-block; padding:2px 7px; border-radius:999px; color:#275078; background:#e8f1fa; font-size:11px; font-weight:700; }
+    .hit p { margin:10px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .empty { padding:18px; color:var(--muted); background:var(--pale); border-radius:9px; font-size:14px; }
+    @media (max-width:720px) { main { margin:22px auto; } .grid { grid-template-columns:1fr; } section { padding:18px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="eyebrow">Local testing tool</div>
+      <h1>Scientific Evidence Test Bench</h1>
+      <p class="intro">Upload a source document, let the ingestion pipeline index it, then search the passages retrieved for your question.</p>
+      <div class="session"><span>Session</span><code id="session-id"></code><button class="secondary" id="new-session" type="button">New session</button></div>
+    </header>
+
+    <div class="grid">
+      <section aria-labelledby="upload-heading">
+        <h2 id="upload-heading">1. Add evidence</h2>
+        <p class="sub">Choose one or more files. The original upload and extracted chunks are stored under this session.</p>
+        <form id="upload-form">
+          <label class="filebox" for="files">Select documents
+            <input id="files" name="files" type="file" multiple accept=".pdf,.docx,.html,.htm,.txt,.md,.png,.jpg,.jpeg,.webp" required>
+            <span class="hint" id="file-hint">PDF, DOCX, HTML, text, Markdown, or image files</span>
+          </label>
+          <label for="question">Question (optional)</label>
+          <textarea id="question" name="question" maxlength="20000" placeholder="What would you like to find out?"></textarea>
+          <label for="source-tier">Source tier</label>
+          <select id="source-tier" name="source_tier">
+            <option value="t0_user">User document (T0)</option>
+            <option value="t1_scholarly">Scholarly (T1)</option>
+            <option value="t2_reference">Reference work (T2)</option>
+            <option value="t3_web">General web (T3)</option>
+          </select>
+          <div class="actions"><button id="upload-button" type="submit">Upload and index</button></div>
+          <p class="status" id="upload-status" role="status" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <section aria-labelledby="search-heading">
+        <h2 id="search-heading">2. Retrieve passages</h2>
+        <p class="sub">Search indexed evidence in the current session.</p>
+        <form id="search-form">
+          <label for="query">Search query</label>
+          <input id="query" name="q" type="text" maxlength="2000" placeholder="e.g. stellar mass" required>
+          <label for="limit">Maximum passages</label>
+          <select id="limit" name="limit">
+            <option>3</option><option selected>5</option><option>10</option><option>20</option>
+          </select>
+          <div class="actions"><button id="search-button" type="submit">Search evidence</button></div>
+          <p class="status" id="search-status" role="status" aria-live="polite"></p>
+        </form>
+        <div class="results" id="results" aria-live="polite"></div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const sessionKey = "scientific-agent-test-session";
+    const makeId = () => crypto.randomUUID ? crypto.randomUUID() : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); });
+    let sessionId = localStorage.getItem(sessionKey) || makeId();
+    const sessionLabel = document.getElementById("session-id");
+    const uploadStatus = document.getElementById("upload-status");
+    const searchStatus = document.getElementById("search-status");
+    const results = document.getElementById("results");
+    const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
+    function setSession(id) { sessionId = id; localStorage.setItem(sessionKey, id); sessionLabel.textContent = id; results.replaceChildren(); searchStatus.textContent = ""; }
+    setSession(sessionId);
+    document.getElementById("new-session").addEventListener("click", () => setSession(makeId()));
+    document.getElementById("files").addEventListener("change", event => {
+      const files = [...event.target.files];
+      document.getElementById("file-hint").textContent = files.length ? files.map(file => `${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`).join(" · ") : "PDF, DOCX, HTML, text, Markdown, or image files";
+    });
+    document.getElementById("upload-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const files = [...document.getElementById("files").files];
+      if (!files.length) { uploadStatus.textContent = "Choose at least one file."; uploadStatus.className = "status error"; return; }
+      const button = document.getElementById("upload-button"); button.disabled = true;
+      uploadStatus.textContent = "Uploading, extracting, and indexing…"; uploadStatus.className = "status";
+      const body = new FormData();
+      const question = document.getElementById("question").value.trim();
+      if (question) body.append("question", question);
+      body.append("source_tier", document.getElementById("source-tier").value);
+      for (const file of files) body.append("files", file, file.name);
+      try {
+        const response = await fetch(`/sessions/${encodeURIComponent(sessionId)}/inputs`, { method:"POST", body });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || `Upload failed (${response.status})`);
+        const docs = data.documents.map(doc => `${doc.filename}: ${doc.chunk_count} chunks, ${doc.page_count} pages, ${doc.parser}${doc.text_extracted ? "" : " (no text extracted)"}`).join("\n");
+        uploadStatus.textContent = `Indexed successfully.\n${docs}`; uploadStatus.className = "status ok";
+        document.getElementById("files").value = "";
+        document.getElementById("file-hint").textContent = "PDF, DOCX, HTML, text, Markdown, or image files";
+      } catch (error) { uploadStatus.textContent = error.message; uploadStatus.className = "status error"; }
+      finally { button.disabled = false; }
+    });
+    document.getElementById("search-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const query = document.getElementById("query").value.trim(); if (!query) return;
+      const button = document.getElementById("search-button"); button.disabled = true;
+      searchStatus.textContent = "Searching…"; searchStatus.className = "status"; results.replaceChildren();
+      try {
+        const params = new URLSearchParams({ q:query, limit:document.getElementById("limit").value });
+        const response = await fetch(`/sessions/${encodeURIComponent(sessionId)}/retrieve?${params}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || `Search failed (${response.status})`);
+        searchStatus.textContent = `${data.hits.length} passage(s) · ${data.retrieval_method}`; searchStatus.className = "status ok";
+        if (!data.hits.length) { results.innerHTML = '<div class="empty">No matching passages. Upload a document or try different terms.</div>'; return; }
+        results.innerHTML = data.hits.map(hit => `<article class="hit"><div class="hit-head"><span>${escapeHtml(hit.filename)} · page ${hit.page} · chunk ${hit.chunk_order}</span><span class="badge">${escapeHtml(hit.source_tier)}</span></div><p>${escapeHtml(hit.text)}</p></article>`).join("");
+      } catch (error) { searchStatus.textContent = error.message; searchStatus.className = "status error"; }
+      finally { button.disabled = false; }
+    });
+  </script>
+</body>
+</html>

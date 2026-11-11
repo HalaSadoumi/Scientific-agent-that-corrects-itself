@@ -8,6 +8,7 @@ from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from agent.config import get_settings
@@ -29,6 +30,12 @@ from agent.storage.catalog import Catalog, PostgresCatalog, get_catalog
 from agent.storage.objects import ObjectStore
 
 app = FastAPI(title="Scientific Verification Agent", version="0.1.0")
+
+
+@app.get("/", include_in_schema=False)
+def test_frontend() -> FileResponse:
+    """Serve the lightweight upload and retrieval page for local testing."""
+    return FileResponse(Path(__file__).parent / "static" / "index.html")
 
 
 class IngestedDocument(BaseModel):
