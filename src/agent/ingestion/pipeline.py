@@ -33,6 +33,13 @@ class TextChunk:
     kind: str = "paragraph"
 
 
+def _tesseract_command(configured: str | None = None) -> str | None:
+    """Resolve PATH installs and an optional explicit executable path."""
+    if configured and Path(configured).is_file():
+        return configured
+    return shutil.which(configured or "tesseract")
+
+
 SUPPORTED_TYPES: dict[str, str] = {
     ".pdf": "application/pdf",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -47,20 +54,23 @@ SUPPORTED_TYPES: dict[str, str] = {
 }
 
 
-def _ocr(image: bytes, language: str, enabled: bool) -> tuple[str, str]:
+def _ocr(
+    image: bytes, language: str, enabled: bool, tesseract_cmd: str | None = None
+) -> tuple[str, str]:
     if not enabled:
         return "", "disabled"
-    if shutil.which("tesseract") is None:
+    command = _tesseract_command(tesseract_cmd)
+    if not command:
         return "", "unavailable"
     try:
         result = subprocess.run(
-            ["tesseract", "stdin", "stdout", "-l", language],
+            [command, "stdin", "stdout", "-l", language],
             input=image,
             capture_output=True,
             check=True,
             timeout=90,
         )
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return "", "failed"
     text = result.stdout.decode("utf-8", errors="replace").strip()
     return text, "completed" if text else "no_text"
@@ -73,13 +83,14 @@ def parse_file(
     overlap: int,
     ocr_enabled: bool = True,
     ocr_language: str = "eng",
+    tesseract_cmd: str | None = None,
 ) -> ParsedFile:
     """Extract text while retaining page boundaries when the format has them."""
     suffix = Path(filename).suffix.lower()
     if suffix not in SUPPORTED_TYPES:
         raise ValueError(f"Unsupported file type: {suffix or '(no extension)'}")
     if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
-        text, status = _ocr(path.read_bytes(), ocr_language, ocr_enabled)
+        text, status = _ocr(path.read_bytes(), ocr_language, ocr_enabled, tesseract_cmd)
         return ParsedFile(
             "tesseract" if status in {"completed", "no_text"} else "image-storage-only",
             filename,
@@ -87,7 +98,7 @@ def parse_file(
             status,
         )
     if suffix == ".pdf":
-        import fitz  # type: ignore[import-untyped]
+        import pymupdf as fitz  # type: ignore[import-untyped]
 
         with fitz.open(str(path)) as pdf:
             pages_list: list[ExtractedPage] = []
@@ -97,7 +108,10 @@ def parse_file(
                 text = page.get_text("text").strip()
                 if not text:
                     text, status = _ocr(
-                        page.get_pixmap(dpi=200).tobytes("png"), ocr_language, ocr_enabled
+                        page.get_pixmap(dpi=250).tobytes("png"),
+                        ocr_language,
+                        ocr_enabled,
+                        tesseract_cmd,
                     )
                     ocr_states.append(status)
                     used_ocr = used_ocr or status in {"completed", "no_text"}
@@ -109,7 +123,9 @@ def parse_file(
                         for block in blocks:
                             image_bytes = block.get("image") if block.get("type") == 1 else None
                             if image_bytes:
-                                image_text, status = _ocr(image_bytes, ocr_language, True)
+                                image_text, status = _ocr(
+                                    image_bytes, ocr_language, True, tesseract_cmd
+                                )
                                 ocr_states.append(status)
                                 if image_text:
                                     text += f"\n[FIGURE OCR TEXT]\n{image_text}"
@@ -121,7 +137,12 @@ def parse_file(
                 try:
                     finder = getattr(page, "find_tables", None)
                     if finder is not None:
-                        tables = finder().tables
+                        try:
+                            # Layout gating may silently suppress clear vector-grid
+                            # tables on current PyMuPDF builds; test the geometry itself.
+                            tables = finder(use_layout=False).tables
+                        except TypeError:
+                            tables = finder().tables
                         rendered = []
                         for table in tables:
                             rows = table.extract()

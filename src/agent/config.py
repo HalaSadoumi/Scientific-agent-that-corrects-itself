@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     chunk_overlap_chars: int = 180
     ocr_enabled: bool = True
     ocr_language: str = "eng"
+    # Optional explicit path is useful on Windows when Tesseract is installed
+    # but its folder has not yet been added to the system PATH.
+    tesseract_cmd: str | None = None
 
     # Optional OpenAI-compatible embeddings endpoint. No text leaves the machine
     # unless an endpoint and API key are explicitly configured.

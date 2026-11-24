@@ -100,6 +100,7 @@ astro-embeddings = [
 ]
 graph = [
     { name = "neo4j" },
+    { name = "truststore" },
 ]
 
 [package.dev-dependencies]
@@ -124,6 +125,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "redis", specifier = ">=5.0" },
     { name = "sentence-transformers", marker = "extra == 'astro-embeddings'", specifier = ">=3.3,<6" },
+    { name = "truststore", marker = "extra == 'graph'", specifier = ">=0.10,<1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 provides-extras = ["astro-embeddings", "graph"]

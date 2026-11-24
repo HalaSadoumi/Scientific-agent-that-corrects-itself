@@ -45,6 +45,7 @@ def process_input_job(payload: dict[str, Any]) -> dict[str, Any]:
             settings.chunk_overlap_chars,
             settings.ocr_enabled,
             settings.ocr_language,
+            getattr(settings, "tesseract_cmd", None),
         )
     pieces = chunk_pages_with_metadata(
         parsed.pages, settings.chunk_size_chars, settings.chunk_overlap_chars

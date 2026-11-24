@@ -19,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 astro-embeddings = ["sentence-transformers>=3.3,<6"]
-graph = ["neo4j>=5.25,<7"]
+graph = ["neo4j>=5.25,<7", "truststore>=0.10,<1"]
 
 [dependency-groups]
 dev = [

@@ -1,3 +1,5 @@
+import io
+from subprocess import CompletedProcess
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -5,7 +7,8 @@ from fastapi.testclient import TestClient
 
 from agent.api import main
 from agent.api.main import app
-from agent.ingestion.pipeline import ExtractedPage, chunk_pages
+from agent.ingestion import pipeline
+from agent.ingestion.pipeline import ExtractedPage, chunk_pages, chunk_pages_with_metadata
 from agent.storage.catalog import Catalog
 
 
@@ -15,6 +18,68 @@ def test_chunking_preserves_page_and_overlap() -> None:
     assert len(chunks) > 1
     assert all(page == 4 for page, _ in chunks)
     assert chunks[0][1][-20:] in chunks[1][1]
+
+
+def test_docx_tables_become_searchable_table_chunks(tmp_path) -> None:
+    from docx import Document
+
+    path = tmp_path / "astro_table.docx"
+    document = Document()
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Planet"
+    table.cell(0, 1).text = "Orbital period"
+    table.cell(1, 0).text = "Kepler-452b"
+    table.cell(1, 1).text = "385 days"
+    document.save(path)
+
+    parsed = pipeline.parse_file(path, path.name, 1200, 100)
+    chunks = chunk_pages_with_metadata(parsed.pages, 1200, 100)
+    assert "Kepler-452b | 385 days" in parsed.pages[0].text
+    assert any(chunk.kind == "table" and "385 days" in chunk.text for chunk in chunks)
+
+
+def test_pdf_vector_table_becomes_searchable_table_chunk(tmp_path) -> None:
+    import pymupdf as fitz
+
+    path = tmp_path / "astro_table.pdf"
+    pdf = fitz.open()
+    page = pdf.new_page(width=600, height=300)
+    cells = ((50, 50, 230, 95), (230, 50, 480, 95), (50, 95, 230, 140), (230, 95, 480, 140))
+    for cell in cells:
+        page.draw_rect(cell, width=1)
+    page.insert_text((60, 78), "Object", fontsize=12)
+    page.insert_text((240, 78), "Distance", fontsize=12)
+    page.insert_text((60, 123), "NGC 1300", fontsize=12)
+    page.insert_text((240, 123), "61 Mly", fontsize=12)
+    pdf.save(path)
+    pdf.close()
+
+    parsed = pipeline.parse_file(path, path.name, 1200, 100)
+    chunks = chunk_pages_with_metadata(parsed.pages, 1200, 100)
+    assert "NGC 1300 | 61 Mly" in parsed.pages[0].text
+    assert any(chunk.kind == "table" and "61 Mly" in chunk.text for chunk in chunks)
+
+
+def test_image_ocr_uses_explicit_tesseract_path(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "chart.png"
+    path.write_bytes(b"image-bytes")
+    tesseract_path = tmp_path / "tesseract.exe"
+    tesseract_path.touch()
+    monkeypatch.setattr(pipeline.shutil, "which", lambda _: None)
+    called = {}
+
+    def fake_run(command, **kwargs):
+        called["command"] = command
+        return CompletedProcess(command, 0, stdout=b"NGC 1300 galaxy image labels", stderr=b"")
+
+    monkeypatch.setattr(pipeline.subprocess, "run", fake_run)
+    parsed = pipeline.parse_file(
+        path, path.name, 1200, 100, ocr_enabled=True, ocr_language="eng",
+        tesseract_cmd=str(tesseract_path),
+    )
+    assert called["command"][0].endswith("tesseract.exe")
+    assert parsed.ocr_status == "completed"
+    assert "NGC 1300" in parsed.pages[0].text
 
 
 def test_upload_is_indexed_and_retrieval_is_session_scoped(tmp_path, monkeypatch) -> None:
@@ -46,11 +111,23 @@ def test_upload_is_indexed_and_retrieval_is_session_scoped(tmp_path, monkeypatch
     )
     client = TestClient(app)
     session = uuid4()
+    from docx import Document
+
+    docx = Document()
+    table = docx.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Planet"
+    table.cell(0, 1).text = "Orbital period"
+    table.cell(1, 0).text = "Kepler-452b"
+    table.cell(1, 1).text = "385 days"
+    table_bytes = io.BytesIO()
+    docx.save(table_bytes)
+    docx_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     response = client.post(
         f"/sessions/{session}/inputs",
         data={"question": "What is the stellar mass?"},
         files=[
-            ("files", ("paper.txt", b"The stellar mass is about 1.4 solar masses.", "text/plain"))
+            ("files", ("paper.txt", b"The stellar mass is about 1.4 solar masses.", "text/plain")),
+            ("files", ("table.docx", table_bytes.getvalue(), docx_type)),
         ],
     )
     assert response.status_code == 200, response.text
@@ -64,6 +141,11 @@ def test_upload_is_indexed_and_retrieval_is_session_scoped(tmp_path, monkeypatch
     assert found.json()["hits"][0]["page"] == 1
     assert found.json()["retrieval_method"] == "sqlite_fts5_bm25"
     assert "keyword" in found.json()["route_reason"]
+
+    table_hit = client.get(f"/sessions/{session}/retrieve", params={"q": "385 days"})
+    assert table_hit.status_code == 200
+    assert "Kepler-452b | 385 days" in table_hit.json()["hits"][0]["text"]
+    assert table_hit.json()["hits"][0]["kind"] == "table"
 
     isolated = client.get(f"/sessions/{uuid4()}/retrieve", params={"q": "stellar mass"})
     assert isolated.status_code == 200

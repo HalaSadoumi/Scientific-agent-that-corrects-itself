@@ -26,7 +26,8 @@
     .nav-icon { width:18px; text-align:center; font-size:16px; }
     .nav-pill { margin-left:auto; padding:2px 6px; border-radius:20px; color:var(--blue); background:#dce8ff; font-size:10px; }
     .sidebar-bottom { margin-top:auto; padding:12px 10px 0; color:#9aa4b3; font-size:11px; }
-    .workspace { min-width:0; padding:0 30px 50px; }
+    .workspace { min-width:0; padding:0 30px 50px; position:relative; isolation:isolate; background:radial-gradient(ellipse at 18% 13%,#e4edff 0,transparent 39%),radial-gradient(ellipse at 88% 58%,#f0eaff 0,transparent 42%),linear-gradient(145deg,#f8faff 0%,#f5f7fc 54%,#faf8ff 100%); }
+    .workspace::before { content:""; position:absolute; z-index:-1; inset:64px 0 0; pointer-events:none; opacity:.38; background-image:radial-gradient(1px 1px at 8% 12%,#526ca7 98%,transparent),radial-gradient(1.5px 1.5px at 78% 18%,#7385b5 98%,transparent),radial-gradient(1px 1px at 42% 34%,#526ca7 98%,transparent),radial-gradient(1px 1px at 91% 53%,#7385b5 98%,transparent),radial-gradient(1.5px 1.5px at 17% 68%,#526ca7 98%,transparent),radial-gradient(1px 1px at 64% 83%,#7385b5 98%,transparent),radial-gradient(1px 1px at 33% 92%,#526ca7 98%,transparent); background-size:390px 310px; }
     .topbar { min-height:64px; display:flex; align-items:center; justify-content:space-between; gap:14px; border-bottom:1px solid var(--line); margin:0 -30px 27px; padding:0 30px; background:#ffffffb8; }
     .top-title { font-weight:750; font-size:15px; }
     .top-actions { display:flex; align-items:center; gap:9px; }
@@ -40,6 +41,11 @@
     .view.active { display:block; animation:appear .18s ease-out; }
     @keyframes appear { from { opacity:.6; transform:translateY(3px); } to { opacity:1; transform:none; } }
     .page-head { margin-bottom:20px; }
+    .page-head h1 { color:#182235; }
+    .page-head .intro { color:#718096; }
+    .top-title { color:#182235; }
+    .topbar { border-bottom-color:#e4e9f1; background:#ffffffc7; }
+    .session { color:#8390a3; }
     .eyebrow { color:var(--blue); font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.13em; }
     h1 { margin:3px 0 2px; font-size:23px; letter-spacing:-.045em; line-height:1.2; }
     .intro { margin:5px 0 0; color:var(--muted); font-size:12px; }
@@ -47,6 +53,8 @@
     .welcome { padding:42px 20px 18px; text-align:center; }
     .welcome-mark { margin:0 auto 14px; width:44px; height:44px; display:grid; place-items:center; border:1px solid #dce6fb; border-radius:15px; color:var(--blue); background:linear-gradient(140deg,#fff,#eff4ff); font-size:22px; }
     .welcome h1 { font-size:29px; }
+    .welcome h1 { color:#182235; }
+    .welcome p { color:#718096; }
     .welcome p { max-width:470px; margin:8px auto 0; color:var(--muted); font-size:13px; }
     .suggestions { display:flex; justify-content:center; flex-wrap:wrap; gap:8px; margin:17px auto 0; }
     .suggestions button { padding:7px 10px; border:1px solid var(--line); border-radius:99px; background:#fff; color:#56647b; font-size:11px; }

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -14,7 +13,12 @@ from pydantic import BaseModel, Field
 
 from agent.config import get_settings
 from agent.generation import ModelServiceError, chat_json
-from agent.ingestion.pipeline import SUPPORTED_TYPES, chunk_pages_with_metadata, parse_file
+from agent.ingestion.pipeline import (
+    SUPPORTED_TYPES,
+    _tesseract_command,
+    chunk_pages_with_metadata,
+    parse_file,
+)
 from agent.retrieval.cache import (
     get as get_cached,
 )
@@ -95,6 +99,7 @@ class RetrievalHit(BaseModel):
     source_tier: str = "t0_user"
     sha256: str
     parser: str
+    kind: str = "paragraph"
 
 
 class RetrievalResponse(BaseModel):
@@ -234,13 +239,16 @@ def capabilities() -> dict[str, Any]:
     """Expose safe configuration status for the interface without returning credentials."""
     settings = get_settings()
     return {
-        "generation_enabled": bool(settings.llm_api_base and settings.llm_model),
+        "generation_enabled": bool(
+            settings.llm_api_base and settings.llm_api_key and settings.llm_model
+        ),
         "generation_model": settings.llm_model,
         "verification_model": settings.verification_model,
         "embedding_backend": selected_backend(settings),
         "graph_enabled": graph_enabled(settings),
         "ocr_enabled": settings.ocr_enabled,
-        "tesseract_available": shutil.which("tesseract") is not None,
+        "tesseract_available": _tesseract_command(getattr(settings, "tesseract_cmd", None))
+        is not None,
     }
 
 
@@ -483,6 +491,7 @@ async def ingest_inputs(
                 settings.chunk_overlap_chars,
                 settings.ocr_enabled,
                 settings.ocr_language,
+                getattr(settings, "tesseract_cmd", None),
             )
         except Exception as exc:
             file_path.unlink(missing_ok=True)
@@ -604,7 +613,10 @@ def retrieve(
     return RetrievalResponse(
         session_id=session_id,
         query=q,
-        hits=[RetrievalHit.model_validate(hit) for hit in hits],
+        hits=[
+            RetrievalHit.model_validate({**hit, "kind": hit.get("chunk_kind", "paragraph")})
+            for hit in hits
+        ],
         retrieval_method=method,
         route_reason=reason,
     )
@@ -625,10 +637,10 @@ def scholarly_search(
 @app.post("/sessions/{session_id}/answer", response_model=AnswerResponse)
 def answer(session_id: UUID, request: AnswerRequest) -> AnswerResponse:
     settings = get_settings()
-    if not settings.llm_api_base or not settings.llm_model:
+    if not settings.llm_api_base or not settings.llm_api_key or not settings.llm_model:
         raise HTTPException(
             status_code=503,
-            detail="Configure LLM_API_BASE and LLM_MODEL to generate answers",
+            detail="Configure LLM_API_BASE, LLM_API_KEY, and LLM_MODEL to generate answers",
         )
     if not settings.verification_model or settings.verification_model == settings.llm_model:
         raise HTTPException(
