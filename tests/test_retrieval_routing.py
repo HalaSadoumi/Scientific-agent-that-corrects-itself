@@ -1,7 +1,9 @@
 from types import SimpleNamespace
 
+import pytest
+
 from agent.retrieval.embeddings import create_embeddings
-from agent.retrieval.graph import extract_entities
+from agent.retrieval.graph import GraphServiceError, extract_entities, snapshot
 from agent.retrieval.routing import choose_route
 
 
@@ -29,3 +31,13 @@ def test_entity_extraction_is_astronomy_specific_and_deduplicated() -> None:
 def test_embedding_backend_none_does_not_call_a_provider() -> None:
     settings = SimpleNamespace(embedding_backend="none")
     assert create_embeddings(["a passage"], settings) is None
+
+
+def test_graph_rejects_a_template_uri_with_a_helpful_error() -> None:
+    settings = SimpleNamespace(
+        neo4j_uri="neo4j+s://YOUR_INSTANCE.databases.neo4j.io",
+        neo4j_user="neo4j",
+        neo4j_password="redacted-test-value",
+    )
+    with pytest.raises(GraphServiceError, match="template hostname"):
+        snapshot(settings, "session-id")

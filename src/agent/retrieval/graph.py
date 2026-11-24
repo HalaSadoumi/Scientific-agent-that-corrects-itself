@@ -39,8 +39,18 @@ def extract_entities(text: str) -> list[str]:
 
 
 def _driver(settings: Any):
-    if not getattr(settings, "neo4j_uri", None):
+    uri = getattr(settings, "neo4j_uri", None)
+    if not uri:
         return None
+    if "YOUR_INSTANCE" in str(uri).upper() or "EXAMPLE.COM" in str(uri).upper():
+        raise GraphServiceError(
+            "NEO4J_URI still contains a template hostname. Copy the real URI from your "
+            "Neo4j Aura instance connection details into .env."
+        )
+    if not getattr(settings, "neo4j_user", None) or not getattr(settings, "neo4j_password", None):
+        raise GraphServiceError(
+            "Set NEO4J_USER and NEO4J_PASSWORD in .env for the graph connection."
+        )
     try:
         from neo4j import GraphDatabase
     except ImportError as exc:
@@ -159,8 +169,13 @@ def snapshot(settings: Any, session_id: str, limit: int = 160) -> dict[str, Any]
     """Return a small visualization snapshot for exactly one session."""
     driver = _driver(settings)
     if driver is None:
-        return {"enabled": False, "entity_count": 0, "relationship_count": 0,
-                "entities": [], "relationships": []}
+        return {
+            "enabled": False,
+            "entity_count": 0,
+            "relationship_count": 0,
+            "entities": [],
+            "relationships": [],
+        }
     try:
         with driver.session(database=getattr(settings, "neo4j_database", "neo4j")) as session:
             return session.execute_read(_read_snapshot, session_id, limit)
@@ -178,7 +193,8 @@ def _read_snapshot(tx: Any, session_id: str, limit: int) -> dict[str, Any]:
                WHERE c.session_id=$session_id
                RETURN e.name AS id, e.name AS name, count(DISTINCT c) AS mentions
                ORDER BY mentions DESC, name LIMIT $limit""",
-            session_id=session_id, limit=limit,
+            session_id=session_id,
+            limit=limit,
         )
     ]
     relationships = [
@@ -189,7 +205,8 @@ def _read_snapshot(tx: Any, session_id: str, limit: int) -> dict[str, Any]:
                RETURN a.name AS source, b.name AS target, 'CO_OCCURS_WITH' AS type,
                       count(DISTINCT c) AS evidence_count
                ORDER BY evidence_count DESC LIMIT $limit""",
-            session_id=session_id, limit=limit,
+            session_id=session_id,
+            limit=limit,
         )
     ]
     return {
