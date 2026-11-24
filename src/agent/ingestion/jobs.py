@@ -11,7 +11,8 @@ from uuid import UUID
 
 from agent.config import get_settings
 from agent.ingestion.pipeline import chunk_pages_with_metadata, parse_file
-from agent.retrieval.embeddings import embed_texts
+from agent.retrieval.embeddings import create_embeddings
+from agent.retrieval.graph import graph_enabled, index_evidence_batch
 from agent.storage.catalog import get_catalog
 from agent.storage.objects import ObjectStore
 
@@ -48,29 +49,23 @@ def process_input_job(payload: dict[str, Any]) -> dict[str, Any]:
     pieces = chunk_pages_with_metadata(
         parsed.pages, settings.chunk_size_chars, settings.chunk_overlap_chars
     )
-    vectors = None
-    if pieces and settings.embedding_api_base:
-        vectors = embed_texts(
-            [text for _, text in pieces],
-            settings.embedding_api_base,
-            settings.embedding_api_key or "",
-            settings.embedding_model,
-        )
+    vectors = create_embeddings([piece.text for piece in pieces], settings) if pieces else None
     document_id = UUID(payload["document_id"])
     session_id = UUID(payload["session_id"])
+    document = {
+        "id": str(document_id),
+        "session_id": str(session_id),
+        "filename": payload["filename"],
+        "mime_type": payload["mime_type"],
+        "sha256": payload["sha256"],
+        "storage_key": payload["storage_key"],
+        "parser": parsed.parser,
+        "page_count": len(parsed.pages),
+        "created_at": datetime.now(UTC).isoformat(),
+        "source_tier": payload.get("source_tier", "t0_user"),
+    }
     get_catalog(settings).add_document(
-        {
-            "id": str(document_id),
-            "session_id": str(session_id),
-            "filename": payload["filename"],
-            "mime_type": payload["mime_type"],
-            "sha256": payload["sha256"],
-            "storage_key": payload["storage_key"],
-            "parser": parsed.parser,
-            "page_count": len(parsed.pages),
-            "created_at": datetime.now(UTC).isoformat(),
-            "source_tier": payload.get("source_tier", "t0_user"),
-        },
+        document,
         [
             {
                 "page": piece.page,
@@ -84,6 +79,25 @@ def process_input_job(payload: dict[str, Any]) -> dict[str, Any]:
             for i, piece in enumerate(pieces)
         ],
     )
+    if graph_enabled(settings):
+        index_evidence_batch(
+            settings,
+            [
+                {
+                    "id": f"{document_id}:{piece.page}:{index}",
+                    "session_id": str(session_id),
+                    "document_id": str(document_id),
+                    "filename": payload["filename"],
+                    "page": piece.page,
+                    "chunk_order": index,
+                    "text": piece.text,
+                    "sha256": payload["sha256"],
+                    "parser": parsed.parser,
+                    "source_tier": payload.get("source_tier", "t0_user"),
+                }
+                for index, piece in enumerate(pieces)
+            ],
+        )
     return {
         "document_id": str(document_id),
         "parser": parsed.parser,

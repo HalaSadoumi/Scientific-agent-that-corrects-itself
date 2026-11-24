@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+import shutil
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
@@ -23,8 +24,18 @@ from agent.retrieval.cache import (
 from agent.retrieval.cache import (
     put as cache_result,
 )
-from agent.retrieval.embeddings import EmbeddingServiceError, embed_texts
+from agent.retrieval.embeddings import EmbeddingServiceError, create_embeddings, selected_backend
+from agent.retrieval.graph import (
+    GraphServiceError,
+    graph_enabled,
+    index_evidence_batch,
+    snapshot as graph_snapshot,
+)
+from agent.retrieval.graph import (
+    search as graph_search,
+)
 from agent.retrieval.planning import plan_queries, rerank
+from agent.retrieval.routing import choose_route
 from agent.retrieval.scholar import ScholarServiceError, search_arxiv
 from agent.storage.catalog import Catalog, PostgresCatalog, get_catalog
 from agent.storage.objects import ObjectStore
@@ -89,6 +100,7 @@ class RetrievalResponse(BaseModel):
     query: str
     hits: list[RetrievalHit]
     retrieval_method: str
+    route_reason: str
 
 
 class ScholarlySearchResponse(BaseModel):
@@ -135,27 +147,22 @@ def _catalog() -> Catalog | PostgresCatalog:
 
 def _query_embedding(query: str) -> list[float] | None:
     settings = get_settings()
-    if not settings.embedding_api_base:
-        return None
     try:
-        return embed_texts(
-            [query],
-            settings.embedding_api_base,
-            settings.embedding_api_key or "",
-            settings.embedding_model,
-        )[0]
+        vectors = create_embeddings([query], settings)
+        return vectors[0] if vectors else None
     except EmbeddingServiceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-def _retrieve(session_id: UUID, query: str, limit: int) -> tuple[list[dict[str, Any]], str]:
+def _retrieve(session_id: UUID, query: str, limit: int) -> tuple[list[dict[str, Any]], str, str]:
     settings = get_settings()
+    embeddings = selected_backend(settings) != "none"
+    route = choose_route(query, embeddings=embeddings, graph=graph_enabled(settings))
     cached = get_cached(session_id, query, limit)
     if cached is not None:
-        return cached, "hybrid_rrf" if settings.embedding_api_base else "sqlite_fts5_bm25"
+        return cached, route.method, route.reason
     planned = plan_queries(query)
     candidates: dict[tuple[str, int, int], dict[str, Any]] = {}
-    semantic_enabled = bool(settings.embedding_api_base)
     for planned_query in planned:
         vector = _query_embedding(planned_query)
         hits = _catalog().search(
@@ -172,9 +179,30 @@ def _retrieve(session_id: UUID, query: str, limit: int) -> tuple[list[dict[str, 
             if existing is None or hit["score"] > existing["score"]:
                 candidates[key] = hit
     ranked = rerank(query, list(candidates.values()), limit)
+    if route.method == "graph_hybrid":
+        try:
+            graph_hits = graph_search(settings, str(session_id), query, max(limit * 3, 10))
+        except GraphServiceError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        # Reciprocal-rank fusion preserves both the graph's exact relationship evidence
+        # and ordinary lexical/semantic matches without comparing unlike raw scores.
+        by_id: dict[tuple[str, int, int], tuple[float, dict[str, Any]]] = {}
+        for rank, hit in enumerate(ranked, 1):
+            key = (str(hit["document_id"]), hit["page"], hit["chunk_order"])
+            by_id[key] = (1 / (60 + rank), hit)
+        for rank, hit in enumerate(graph_hits, 1):
+            key = (str(hit["document_id"]), hit["page"], hit["chunk_order"])
+            score = 1 / (60 + rank)
+            if key in by_id:
+                old_score, old_hit = by_id[key]
+                by_id[key] = (old_score + score, old_hit)
+            else:
+                by_id[key] = (score, hit)
+        ranked = [
+            hit for _, hit in sorted(by_id.values(), key=lambda item: item[0], reverse=True)[:limit]
+        ]
     cache_result(session_id, query, limit, ranked)
-    method = "hybrid_rrf" if semantic_enabled else "sqlite_fts5_bm25"
-    return ranked, method
+    return ranked, route.method, route.reason
 
 
 def _object_store() -> ObjectStore:
@@ -197,6 +225,62 @@ def _object_store() -> ObjectStore:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "env": get_settings().app_env}
+
+
+@app.get("/capabilities")
+def capabilities() -> dict[str, Any]:
+    """Expose safe configuration status for the interface without returning credentials."""
+    settings = get_settings()
+    return {
+        "generation_enabled": bool(settings.llm_api_base and settings.llm_model),
+        "generation_model": settings.llm_model,
+        "verification_model": settings.verification_model,
+        "embedding_backend": selected_backend(settings),
+        "graph_enabled": graph_enabled(settings),
+        "ocr_enabled": settings.ocr_enabled,
+        "tesseract_available": shutil.which("tesseract") is not None,
+    }
+
+
+@app.get("/routing/policy")
+def routing_policy() -> dict[str, Any]:
+    """Describe the current deterministic route rules; there is no learned Q table yet."""
+    return {
+        "policy_type": "deterministic_query_router",
+        "routes": [
+            {
+                "method": "graph_hybrid",
+                "when": "A relation question or supported astronomy/catalog identifier is present, and Neo4j is configured.",
+                "action": "Combine graph evidence with BM25 and, when enabled, semantic retrieval.",
+            },
+            {
+                "method": "hybrid_rrf",
+                "when": "Embeddings are enabled and the query does not trigger a graph route.",
+                "action": "Fuse BM25 and vector rankings, then rerank candidates.",
+            },
+            {
+                "method": "sqlite_fts5_bm25",
+                "when": "No semantic backend is enabled and graph routing does not apply.",
+                "action": "Use session-scoped full-text keyword search.",
+            },
+        ],
+        "learning": "No Q-learning is implemented; routes are explainable rules.",
+    }
+
+
+@app.get("/sessions/{session_id}/snapshot")
+def session_snapshot(session_id: UUID) -> dict[str, Any]:
+    """Session-scoped corpus metrics for the dashboard."""
+    return _catalog().session_snapshot(session_id)
+
+
+@app.get("/sessions/{session_id}/graph")
+def session_graph(session_id: UUID) -> dict[str, Any]:
+    """Return a session-only Neo4j visualization snapshot, or an explicit disabled state."""
+    try:
+        return graph_snapshot(get_settings(), str(session_id))
+    except GraphServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post("/sessions/{session_id}/input-jobs", response_model=InputJobsResponse, status_code=202)
@@ -390,14 +474,9 @@ async def ingest_inputs(
             parsed.pages, settings.chunk_size_chars, settings.chunk_overlap_chars
         )
         vectors: list[list[float]] | None = None
-        if pieces and settings.embedding_api_base:
+        if pieces:
             try:
-                vectors = embed_texts(
-                    [piece.text for piece in pieces],
-                    settings.embedding_api_base,
-                    settings.embedding_api_key or "",
-                    settings.embedding_model,
-                )
+                vectors = create_embeddings([piece.text for piece in pieces], settings)
             except EmbeddingServiceError as exc:
                 file_path.unlink(missing_ok=True)
                 raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -452,6 +531,28 @@ async def ingest_inputs(
             raise HTTPException(
                 status_code=503, detail="Could not save the input to the catalog"
             ) from exc
+        if graph_enabled(settings):
+            try:
+                index_evidence_batch(
+                    settings,
+                    [
+                        {
+                            "id": f"{document_id}:{piece.page}:{i}",
+                            "session_id": str(session_id),
+                            "document_id": str(document_id),
+                            "filename": filename,
+                            "page": piece.page,
+                            "chunk_order": i,
+                            "text": piece.text,
+                            "sha256": digest,
+                            "parser": parsed.parser,
+                            "source_tier": source_tier,
+                        }
+                        for i, piece in enumerate(pieces)
+                    ],
+                )
+            except GraphServiceError as exc:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
         if getattr(settings, "object_storage_backend", "local") == "s3":
             file_path.unlink(missing_ok=True)
         invalidate_cache(session_id)
@@ -480,12 +581,13 @@ def retrieve(
     q: str = Query(min_length=1, max_length=2_000),
     limit: int = Query(default=5, ge=1, le=20),
 ) -> RetrievalResponse:
-    hits, method = _retrieve(session_id, q, limit)
+    hits, method, reason = _retrieve(session_id, q, limit)
     return RetrievalResponse(
         session_id=session_id,
         query=q,
         hits=[RetrievalHit.model_validate(hit) for hit in hits],
         retrieval_method=method,
+        route_reason=reason,
     )
 
 
@@ -515,7 +617,7 @@ def answer(session_id: UUID, request: AnswerRequest) -> AnswerResponse:
             detail="Configure a separate VERIFICATION_MODEL for independent claim checks",
         )
 
-    hits, _ = _retrieve(session_id, request.question, 8)
+    hits, _, _ = _retrieve(session_id, request.question, 8)
     sources: dict[str, dict[str, Any]] = {}
     evidence: list[dict[str, str]] = []
     for hit in hits:
@@ -587,7 +689,7 @@ def answer(session_id: UUID, request: AnswerRequest) -> AnswerResponse:
             if isinstance(citation_values, list)
             else []
         )
-        claim_hits, _ = _retrieve(session_id, text, 4)
+        claim_hits, _, _ = _retrieve(session_id, text, 4)
         verification_evidence: list[dict[str, str]] = []
         for hit in claim_hits:
             source_id = f"{hit['document_id']}:{hit['page']}:{hit['chunk_order']}"

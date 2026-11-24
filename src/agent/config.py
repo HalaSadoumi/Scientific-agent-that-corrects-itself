@@ -41,7 +41,14 @@ class Settings(BaseSettings):
     embedding_api_base: str | None = None
     embedding_api_key: str | None = None
     embedding_model: str = "text-embedding-3-small"
+    embedding_backend: Literal["auto", "none", "api", "local"] = "auto"
+    local_embedding_model: str = "NeuML/astrobert-small-embeddings"
     semantic_weight: float = Field(default=0.5, ge=0.0, le=1.0)
+
+    neo4j_uri: str | None = None
+    neo4j_user: str | None = None
+    neo4j_password: str | None = None
+    neo4j_database: str = "neo4j"
 
     llm_api_base: str | None = None
     llm_api_key: str | None = None

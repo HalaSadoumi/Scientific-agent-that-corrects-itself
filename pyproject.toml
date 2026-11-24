@@ -17,6 +17,10 @@ dependencies = [
     "redis>=5.0",
 ]
 
+[project.optional-dependencies]
+astro-embeddings = ["sentence-transformers>=3.3,<6"]
+graph = ["neo4j>=5.25,<7"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",

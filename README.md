@@ -7,10 +7,13 @@ This repository implements a configurable evidence pipeline: **input → ingesti
 - Upload a question and PDF, DOCX, HTML, TXT, Markdown, or image files to a session.
 - Extract document text, preserve PDF page numbers, and use Tesseract OCR for images or textless PDF pages when Tesseract is installed.
 - Search evidence with SQLite FTS5 BM25; optionally add semantic embeddings and hybrid rank fusion through an explicitly configured OpenAI-compatible endpoint.
+- Select a free local AstroBERT astronomy embedding backend, keyword-only mode, or an external embeddings API. Local embeddings keep passage text on the computer.
+- Route identifier and relationship questions through optional Neo4j Aura or another Neo4j database, then combine graph evidence with normal retrieval. The API reports the selected method and reason.
 - Plan focused query clauses, rerank by query coverage and caller-supplied source tier, and briefly cache session searches.
 - Select SQLite/local files for development or Postgres/pgvector plus Garage S3-compatible object storage for a service-backed setup.
 - Queue larger uploads through Redis Streams, run a worker with up to three attempts, and poll job status.
-- Search arXiv abstracts and request an answer composed from evidence, checked by a separately named verification model with a second retrieval pass. Generated citations are restricted to sources actually returned by retrieval, and the result is saved to the audit log.
+- Search arXiv abstracts and generate answers through a configured OpenAI-compatible model endpoint (the Gemini API works here). Each claim is checked through a separately named verification model and a second retrieval pass. Generated citations are restricted to retrieved sources, and the result is saved to the audit log.
+- Use the answer panel in the interface to see per-claim verdicts, draft citations, verification evidence, and notes.
 
 API details are available at `/docs` when the server is running.
 
@@ -26,6 +29,16 @@ uv run uvicorn agent.api.main:app --app-dir src --reload
 ```
 
 The simplest setup needs no containers: SQLite and local file storage are the defaults. Uploaded originals and the catalog are written beneath `data/`.
+
+To enable the free local AstroBERT encoder and Neo4j support, install their optional packages:
+
+```powershell
+uv sync --extra astro-embeddings --extra graph
+```
+
+Set `EMBEDDING_BACKEND=local` to use AstroBERT for both document and query vectors. The first use downloads the model and requires network access; later embedding runs are local. Set `EMBEDDING_BACKEND=none` for keyword-only search, or choose `api` to send embeddings to a hosted provider. For Neo4j, create a free AuraDB instance and set `NEO4J_URI`, `NEO4J_USER`, and `NEO4J_PASSWORD`. Graph storage is separate from the SQLite/Postgres catalog and activates only when the URI is configured.
+
+The example `.env` uses Gemini's OpenAI-compatible chat endpoint and two different model IDs as free-tier starting settings. Add your own AI Studio API key in `LLM_API_KEY`; never put it in browser code or commit `.env`. Provider free quotas and availability can change, and free-tier requests may be used to improve provider products. User evidence sent to Gemini leaves this computer. For a local-only workflow, leave the chat settings empty; answer generation will remain unavailable until a model endpoint is configured.
 
 To use the service-backed setup, set `STORAGE_BACKEND=postgres` and `OBJECT_STORAGE_BACKEND=s3` in `.env`, then start services:
 

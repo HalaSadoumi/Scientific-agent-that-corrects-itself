@@ -15,6 +15,8 @@ The implemented software covers these steps:
 
 It does **not** automatically patch claims marked unsupported or run cascade/dependency checks. A separate model call is not a proof of scientific correctness. API authentication and per-user authorization are also not implemented.
 
+The astronomy-focused version can optionally use a local AstroBERT embedding model and a Neo4j graph database. These are optional because they need extra packages and setup. The app still runs with its dependable BM25 keyword-search baseline when they are not configured.
+
 ## 2. A few words used in this guide
 
 - **API:** a set of URLs that another program (or a person using the API page) can call.
@@ -220,7 +222,11 @@ Settings can be supplied as environment variables or in `.env`. The most relevan
 | `EMBEDDING_API_BASE` | unset | Enables embeddings when set, usually to an OpenAI-compatible `/v1` API base. |
 | `EMBEDDING_API_KEY` | unset | Credential sent to the configured embedding endpoint. |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | Model name sent to the embeddings service. |
+| `EMBEDDING_BACKEND` | `auto` | `auto` preserves API URL behavior; choose `local` for AstroBERT, `api` for hosted vectors, or `none` for BM25 only. |
+| `LOCAL_EMBEDDING_MODEL` | `NeuML/astrobert-small-embeddings` | Astronomy model downloaded and run on the API computer when the local backend is selected. |
 | `SEMANTIC_WEIGHT` | `0.5` | Semantic share in hybrid ranking, from `0` (keyword) to `1` (semantic). |
+| `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD` | unset | Optional Neo4j graph connection; unset means graph routing and graph indexing stay off. |
+| `NEO4J_DATABASE` | `neo4j` | Database name on the configured graph server. |
 | `LLM_API_BASE` | unset | Enables answer drafting and verification through an OpenAI-compatible endpoint. |
 | `LLM_API_KEY` | unset | Provider credential; needed only if the provider requires it. |
 | `LLM_MODEL` | unset | Model used to draft answers. |
@@ -313,17 +319,72 @@ The services are connected when selected by configuration:
 
 The local development setup uses one Garage node with no redundancy. The Postgres catalog creates its schema in code, not through versioned migrations. Those are reasons to treat this as a development implementation rather than a production deployment.
 
-## 13. What is still needed for the full architecture
+## 13. The astronomy agent: route, graph, answer, and verification
+
+### Choosing a retrieval method for each question
+
+`src/agent/retrieval/routing.py` is the small, transparent “agent” that selects a retrieval route. It examines the words and astronomy identifiers in the question and returns both a method name and a human-readable reason. It does not ask an LLM to choose, so a result is repeatable and does not spend extra API calls.
+
+- A relationship question (for example, how an object relates to an observation) uses **graph plus regular retrieval** when Neo4j is configured.
+- When semantic vectors are available, an ordinary question uses **hybrid BM25 + vector search**.
+- When they are not, it uses **SQLite BM25 keyword search**. That route works locally without an API key.
+
+This is an initial policy, not a learned decision system. The interface and retrieval response show the selected method/reason. Once a labeled astronomy evaluation set exists, the policy can be compared against alternatives. Q-learning should wait until feedback is tied to evidence correctness rather than user satisfaction alone.
+
+### Free astronomy embeddings
+
+`src/agent/retrieval/embeddings.py` implements two explicitly selected choices. `EMBEDDING_BACKEND=local` loads `NeuML/astrobert-small-embeddings` through Sentence Transformers and embeds both document chunks and search queries on the API computer. This is free of embedding API charges and keeps text local, but it needs a one-time model download plus local disk, memory, and CPU. Install the optional package group with `uv sync --extra astro-embeddings`. `EMBEDDING_BACKEND=api` uses the configured OpenAI-compatible service and sends chunk/query text to that service. `none` keeps search keyword-only.
+
+The same model must be used at ingestion and search. If you change embedding model after documents already have vectors, re-ingest those documents; different models may use different vector sizes or vector meaning. The app falls back to BM25 only when embeddings are explicitly off. A configured embedding failure is surfaced as an error instead of quietly pretending semantic search succeeded.
+
+The local astronomy model was compared in `benchmarks/ASTRONOMY_EMBEDDINGS_REPORT.md` using a public astronomy abstract benchmark. That test measures retrieval of relevant paper abstracts; it does not prove exact passage accuracy, answer quality, OCR quality, or scientific correctness. Run a separate evaluation on the project's target documents before presenting it as an accuracy guarantee.
+
+### Neo4j graph retrieval
+
+`src/agent/retrieval/graph.py` is an optional Neo4j connection. The catalog remains the source of full chunk text and ordinary BM25/vector search; Neo4j stores searchable evidence chunks plus recognizable astronomy entities and their links to the passages that mention them. It can also link co-occurring entities with the ID of the passage that supports that link. A graph hit therefore includes the source filename, page, chunk number, and text rather than being an unsupported fact on its own.
+
+Entity extraction currently recognizes a conservative list of astronomical catalog identifiers, named celestial objects, and instruments. It is rule-based, not a general scientific knowledge extractor. Unrecognized names will not become graph entities, and co-occurrence alone does not prove causation. The graph route is only active when `NEO4J_URI` is set. Install the connector with `uv sync --extra graph`; then set the URI, username, password, and database for your Neo4j instance. A free Neo4j Aura instance keeps the graph outside this computer, but graph data sent there is still external data sharing. Without Neo4j settings, the rest of the application remains available.
+
+### Answer generation and independent claim checking
+
+The web page now has a **Draft and verify** action. The backend uses retrieved passages to ask the configured writing model to produce short, separately checkable claims. It rejects citations that do not match IDs in its retrieved evidence. For every claim it runs retrieval again, then asks the separately named verifier model whether that claim is supported, contradicted, or uncertain. It saves the answer and evidence record in the audit log. The interface shows the verdict, the draft's citations, the verifier's evidence, and verifier notes.
+
+The `.env.example` shows Gemini's OpenAI-compatible chat endpoint with two different model IDs as a starting configuration. Gemini API free-tier quotas and model availability change; configure a key and check the current provider limits. Evidence submitted to Gemini leaves the computer, and free-tier terms may permit use of requests to improve the provider's products. The key stays on the API server in `.env`, never in the web page. If there is no model configuration, upload and retrieval still work, but answer generation returns a setup error. Independent model calls can still be wrong, so `supported` is a model verdict based on supplied passages—not proof.
+
+The browser's answer view escapes text before displaying it, labels empty/uncertain verdicts, and includes an audit ID so a user can open the saved API audit record. It does not automatically rewrite unsupported claims: correction and dependency checks need a stronger evaluated design before they should alter scientific statements.
+
+### Tesseract OCR's role
+
+`src/agent/ingestion/pipeline.py` already uses Tesseract for image uploads and scanned PDF pages when the system program and matching language pack are installed. It also tries OCR on image blocks inside PDFs when PyMuPDF exposes them. OCR contributes recognized words to ordinary chunking and retrieval. Tesseract does not infer plotted values, axis relationships, figure meaning, or the content of a mathematical diagram; those remain limitations. OCR settings are `OCR_ENABLED` and `OCR_LANGUAGE`. A response status of `unavailable` means Tesseract is not installed or not discoverable on the server machine.
+
+### Full flow, from upload to an answer
+
+```text
+PDF/text/image
+  -> parser (PyMuPDF, DOCX/HTML/text reader, optional Tesseract)
+  -> chunks with page and character offsets
+  -> SQLite/Postgres catalog + BM25 index + optional AstroBERT vectors
+  -> optional Neo4j entity/evidence graph
+  -> router chooses graph+hybrid, vector+BM25 hybrid, or BM25
+  -> evidence passages with file/page/chunk provenance
+  -> answer model creates cited atomic claims
+  -> second retrieval pass gathers evidence for each claim
+  -> separate verifier assigns supported/contradicted/uncertain/unsupported
+  -> claim verdicts, evidence links, model names, and audit ID in the UI
+```
+
+## 14. What is still needed for the full architecture
 
 To move closer to the whole architecture, the remaining work includes:
 
 1. Add versioned database migrations, session deletion/retention endpoints, and transaction cleanup for failed multi-file uploads.
 2. Add a vector index once the embedding model's vector size is fixed, and measure retrieval accuracy against a representative scientific-question set.
 3. Add stronger OCR quality checks and figure/table/chart extraction with page coordinates.
-4. Expand scholarly connectors beyond arXiv abstracts, persist source-tier metadata, and evaluate source quality.
+4. Expand scholarly connectors beyond arXiv abstracts, improve astronomy identifier resolution, and independently assess source quality.
 5. Add bounded surgical patching and cascade/dependency checks for claims that fail verification.
 6. Add API authentication, per-user authorization, quotas, observability, and production deployment safeguards.
+7. Add migrations and a model-version field to embeddings before switching embedding models in an already populated deployment; until then, re-ingest documents when the chosen embedding model changes.
 
 External embeddings, chat-model calls, and live arXiv requests were not exercised by tests because they require provider credentials or external network access. Those features use mocked tests for their application behavior. Tesseract OCR logic was implemented, but this computer does not currently have the Tesseract executable, so real OCR quality still needs a live sample-file check.
 
-The end-to-end path that was exercised locally uses Postgres/pgvector, Garage S3-compatible storage, Redis Streams, a queued text upload, and subsequent retrieval. The complete generation path has unit coverage for citation filtering and audit logging, but still needs live evaluation with the chosen models.
+The end-to-end path that was exercised locally uses Postgres/pgvector, Garage S3-compatible storage, Redis Streams, a queued text upload, and subsequent retrieval. The complete generation path has unit coverage for citation filtering and audit logging, but still needs live evaluation with the chosen models. The graph connector, local AstroBERT model download/encoding, Gemini calls, and real Tesseract OCR require their optional services/programs and credentials, so offline automated tests mock or skip those external capabilities.

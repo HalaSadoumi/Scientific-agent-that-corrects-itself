@@ -106,6 +106,37 @@ class Catalog:
             "created_at": row["created_at"],
         }
 
+    def session_snapshot(self, session_id: UUID) -> dict[str, Any]:
+        """Return session-scoped counts for the dashboard, never other sessions' data."""
+        with self.connect() as db:
+            documents = db.execute(
+                """SELECT d.id, d.filename, d.parser, d.page_count, d.source_tier, d.created_at,
+                          COUNT(c.id) AS chunk_count
+                   FROM documents d LEFT JOIN chunks c ON c.document_id=d.id
+                   WHERE d.session_id=? GROUP BY d.id ORDER BY d.created_at DESC""",
+                (str(session_id),),
+            ).fetchall()
+            chunks = db.execute(
+                "SELECT text, chunk_kind, embedding FROM chunks WHERE session_id=?",
+                (str(session_id),),
+            ).fetchall()
+        kinds: dict[str, int] = {}
+        words = 0
+        embedded = 0
+        for chunk in chunks:
+            kinds[chunk["chunk_kind"]] = kinds.get(chunk["chunk_kind"], 0) + 1
+            words += len(re.findall(r"\b[\w'-]+\b", chunk["text"]))
+            embedded += chunk["embedding"] is not None
+        return {
+            "document_count": len(documents),
+            "page_count": sum(row["page_count"] for row in documents),
+            "chunk_count": len(chunks),
+            "word_count": words,
+            "embedded_chunk_count": embedded,
+            "chunk_kinds": kinds,
+            "documents": [dict(row) for row in documents],
+        }
+
     def connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.database, timeout=15)
         db.row_factory = sqlite3.Row
@@ -340,6 +371,38 @@ class PostgresCatalog:
                 (audit_id, session_id),
             ).fetchone()
         return dict(row) if row else None
+
+    def session_snapshot(self, session_id: UUID) -> dict[str, Any]:
+        """Return session-scoped counts for the dashboard, never other sessions' data."""
+        with self.connect() as db:
+            documents = db.execute(
+                """SELECT d.id, d.filename, d.parser, d.page_count, d.source_tier, d.created_at,
+                          COUNT(c.id) AS chunk_count
+                   FROM documents d LEFT JOIN chunks c ON c.document_id=d.id
+                   WHERE d.session_id=%s GROUP BY d.id ORDER BY d.created_at DESC""",
+                (session_id,),
+            ).fetchall()
+            chunks = db.execute(
+                "SELECT text, chunk_kind, embedding IS NOT NULL AS has_embedding "
+                "FROM chunks WHERE session_id=%s",
+                (session_id,),
+            ).fetchall()
+        kinds: dict[str, int] = {}
+        words = 0
+        embedded = 0
+        for chunk in chunks:
+            kinds[chunk["chunk_kind"]] = kinds.get(chunk["chunk_kind"], 0) + 1
+            words += len(re.findall(r"\b[\w'-]+\b", chunk["text"]))
+            embedded += bool(chunk["has_embedding"])
+        return {
+            "document_count": len(documents),
+            "page_count": sum(row["page_count"] for row in documents),
+            "chunk_count": len(chunks),
+            "word_count": words,
+            "embedded_chunk_count": embedded,
+            "chunk_kinds": kinds,
+            "documents": [dict(row) for row in documents],
+        }
 
     def add_document(self, document: dict[str, Any], chunks: list[dict[str, Any]]) -> None:
         with self.connect() as db:
