@@ -17,7 +17,7 @@ This repository implements a configurable evidence pipeline: **input → ingesti
 
 API details are available at `/docs` when the server is running.
 
-For manual ingestion and retrieval checks, open `http://127.0.0.1:8000/`. The test bench provides a regular multi-file picker, keeps a session ID in the browser, uploads files through the same API endpoint, and displays retrieved passages with provenance.
+For manual ingestion and retrieval checks, open `http://127.0.0.1:8000/`. The dashboard has Chat, Pipeline, Metrics, Graph, Evidence, and Policy views. It keeps a session ID in the browser, uploads files through the same API endpoint, and shows answer claims with citations and verifier verdicts.
 
 ## Local setup
 

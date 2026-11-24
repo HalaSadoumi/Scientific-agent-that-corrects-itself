@@ -170,6 +170,19 @@ Answering requires `LLM_API_BASE`, `LLM_MODEL`, and `VERIFICATION_MODEL`; set `L
 
 While the server is running, open `http://127.0.0.1:8000/docs` in a browser. FastAPI builds this page from the endpoint definitions. You can inspect request fields and try calls there.
 
+### Dashboard pages
+
+Open `http://127.0.0.1:8000/` for the app-style interface. The left navigation changes between six views while keeping the same session:
+
+- **Chat** asks a question, previews retrieved context, displays answer claims, and shows the verifier's verdicts, citations, and audit record link.
+- **Pipeline** uploads supported sources and reports the parser, pages, chunks, and OCR status returned by ingestion.
+- **Metrics** reads real per-session document, page, chunk, word, and vector counts from the catalog. It also lists document parsers and chunk kinds.
+- **Graph** visualizes the current session's Neo4j entity and co-occurrence snapshot. When Neo4j is not configured, it explains how to enable it rather than drawing sample data.
+- **Evidence** runs normal BM25/vector retrieval and graph-only retrieval side by side, with source filename, page, chunk, and trust label.
+- **Policy** describes the real deterministic routing rules and the most recent route. It does not show made-up Q-learning scores; that learning feature is not implemented.
+
+The right panel is a session snapshot. Its metrics are fetched from `/sessions/{session_id}/snapshot`, graph counts from `/sessions/{session_id}/graph`, and safe configuration indicators from `/capabilities`. The credentials themselves are never returned to the browser. `/sessions/{session_id}/graph/search` returns graph-only evidence for the Evidence view, and `/routing/policy` describes the route rules.
+
 ## 6. What the file reader supports
 
 The extension on the uploaded filename determines which parser is selected:

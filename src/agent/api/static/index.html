@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f8fc">
+  <title>AstroVerify · Scientific RAG</title>
+  <style>
+    :root { color-scheme:light; --ink:#182235; --muted:#718096; --line:#e4e9f1; --blue:#2759d8; --blue-dark:#183a94; --blue-pale:#edf3ff; --green:#16845d; --red:#b54141; --amber:#a86b08; --canvas:#f6f8fc; --white:#fff; --shadow:0 8px 28px #21375c0b; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--canvas); color:var(--ink); font:14px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
+    button,input,textarea,select { font:inherit; }
+    button { cursor:pointer; }
+    a { color:var(--blue); }
+    .shell { min-height:100vh; display:grid; grid-template-columns:216px minmax(0,1fr) 260px; }
+    .sidebar { position:sticky; top:0; height:100vh; padding:22px 14px; background:#fff; border-right:1px solid var(--line); display:flex; flex-direction:column; z-index:3; }
+    .brand { display:flex; align-items:center; gap:10px; padding:3px 8px 24px; }
+    .brand-mark { width:35px; height:35px; display:grid; place-items:center; color:#fff; border-radius:11px; background:linear-gradient(145deg,#3977f5,#173a9b); font-size:20px; box-shadow:0 5px 12px #2759d833; }
+    .brand-name { font-size:15px; font-weight:780; letter-spacing:-.035em; }
+    .brand-sub { color:#8a95a8; font-size:10px; letter-spacing:.045em; text-transform:uppercase; }
+    .nav-label { padding:7px 10px; color:#98a1b0; font-size:10px; text-transform:uppercase; letter-spacing:.12em; font-weight:800; }
+    .nav { display:grid; gap:4px; }
+    .nav button { display:flex; align-items:center; gap:11px; width:100%; padding:10px 11px; border:0; border-radius:9px; color:#667287; background:transparent; text-align:left; font-size:13px; font-weight:600; transition:.15s; }
+    .nav button:hover { background:#f4f6fa; color:var(--ink); }
+    .nav button.active { color:var(--blue); background:var(--blue-pale); }
+    .nav-icon { width:18px; text-align:center; font-size:16px; }
+    .nav-pill { margin-left:auto; padding:2px 6px; border-radius:20px; color:var(--blue); background:#dce8ff; font-size:10px; }
+    .sidebar-bottom { margin-top:auto; padding:12px 10px 0; color:#9aa4b3; font-size:11px; }
+    .workspace { min-width:0; padding:0 30px 50px; }
+    .topbar { min-height:64px; display:flex; align-items:center; justify-content:space-between; gap:14px; border-bottom:1px solid var(--line); margin:0 -30px 27px; padding:0 30px; background:#ffffffb8; }
+    .top-title { font-weight:750; font-size:15px; }
+    .top-actions { display:flex; align-items:center; gap:9px; }
+    .session { max-width:145px; color:#8390a3; font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .icon-btn,.btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; border:1px solid var(--line); border-radius:8px; padding:8px 11px; background:#fff; color:#4d5a70; font-size:12px; font-weight:700; }
+    .icon-btn:hover,.btn:hover { border-color:#c8d5ee; background:#fafcff; }
+    .btn.primary { border-color:var(--blue); color:#fff; background:var(--blue); box-shadow:0 4px 10px #2759d82c; }
+    .btn.primary:hover { background:#1e4dc2; }
+    .btn:disabled { opacity:.55; cursor:wait; }
+    .view { display:none; max-width:1050px; margin:0 auto; }
+    .view.active { display:block; animation:appear .18s ease-out; }
+    @keyframes appear { from { opacity:.6; transform:translateY(3px); } to { opacity:1; transform:none; } }
+    .page-head { margin-bottom:20px; }
+    .eyebrow { color:var(--blue); font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.13em; }
+    h1 { margin:3px 0 2px; font-size:23px; letter-spacing:-.045em; line-height:1.2; }
+    .intro { margin:5px 0 0; color:var(--muted); font-size:12px; }
+    .chat-wrap { max-width:790px; margin:0 auto; }
+    .welcome { padding:42px 20px 18px; text-align:center; }
+    .welcome-mark { margin:0 auto 14px; width:44px; height:44px; display:grid; place-items:center; border:1px solid #dce6fb; border-radius:15px; color:var(--blue); background:linear-gradient(140deg,#fff,#eff4ff); font-size:22px; }
+    .welcome h1 { font-size:29px; }
+    .welcome p { max-width:470px; margin:8px auto 0; color:var(--muted); font-size:13px; }
+    .suggestions { display:flex; justify-content:center; flex-wrap:wrap; gap:8px; margin:17px auto 0; }
+    .suggestions button { padding:7px 10px; border:1px solid var(--line); border-radius:99px; background:#fff; color:#56647b; font-size:11px; }
+    .suggestions button:hover { color:var(--blue); border-color:#bfd0f6; }
+    .chat-log { display:grid; gap:14px; padding:8px 8px 13px; }
+    .user-bubble { justify-self:end; max-width:80%; padding:11px 14px; border-radius:14px 14px 4px 14px; color:#fff; background:#263b62; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .assistant-block { display:grid; grid-template-columns:28px minmax(0,1fr); gap:10px; align-items:start; }
+    .assistant-mark { width:27px; height:27px; display:grid; place-items:center; border-radius:9px; color:var(--blue); background:#e7efff; }
+    .answer-card { padding:14px 16px; border:1px solid var(--line); border-radius:4px 13px 13px 13px; background:#fff; box-shadow:var(--shadow); }
+    .answer-card p { margin:3px 0 10px; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .claim { padding:11px 12px; margin-top:9px; border:1px solid var(--line); border-left:3px solid #d19a36; border-radius:8px; background:#fcfdff; }
+    .claim.supported { border-left-color:var(--green); }
+    .claim.contradicted,.claim.unsupported { border-left-color:var(--red); }
+    .claim-top { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:5px; }
+    .verdict { color:var(--amber); font-size:10px; font-weight:850; letter-spacing:.08em; text-transform:uppercase; }
+    .verdict.supported { color:var(--green); }
+    .verdict.contradicted,.verdict.unsupported { color:var(--red); }
+    .claim-text { margin:0 0 7px!important; }
+    .claim-meta { padding-top:7px; border-top:1px solid #edf0f5; color:#788397; font-size:10px; overflow-wrap:anywhere; }
+    .claim-meta strong { color:#536178; }
+    .answer-meta { margin-top:9px; color:#8893a5; font-size:10px; }
+    .composer { position:sticky; bottom:12px; z-index:2; padding:8px; border:1px solid #dae2ee; border-radius:14px; background:#fff; box-shadow:0 12px 34px #263b6218; }
+    .composer textarea { display:block; width:100%; min-height:58px; max-height:180px; resize:vertical; padding:9px 10px; border:0; outline:0; color:var(--ink); background:transparent; font-size:13px; }
+    .composer-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:2px 2px 0; }
+    .composer-hint { color:#9aa4b3; font-size:10px; }
+    .check-inline { display:inline-flex; align-items:center; gap:6px; color:#788397; font-size:10px; }
+    .panel { padding:18px; border:1px solid var(--line); border-radius:12px; background:#fff; box-shadow:var(--shadow); }
+    .panel h2 { margin:0; font-size:14px; letter-spacing:-.02em; }
+    .panel-sub { margin:4px 0 15px; color:var(--muted); font-size:11px; }
+    .pipeline-grid { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(260px,.7fr); gap:15px; align-items:start; }
+    .drop { display:block; padding:26px 18px; border:1px dashed #bbc9df; border-radius:10px; background:#f9fbff; text-align:center; cursor:pointer; }
+    .drop:hover { border-color:var(--blue); background:#f4f7ff; }
+    .drop-icon { color:var(--blue); font-size:25px; }
+    .drop strong { display:block; margin-top:5px; font-size:12px; }
+    .drop span { display:block; margin-top:3px; color:var(--muted); font-size:10px; }
+    input[type=file] { width:100%; margin-top:9px; color:#748096; font-size:11px; }
+    .field-label { display:block; margin:14px 0 6px; color:#536178; font-size:11px; font-weight:750; }
+    input[type=text],textarea.query,select { width:100%; padding:10px 11px; border:1px solid #dce3ed; border-radius:8px; outline:none; color:var(--ink); background:white; font-size:12px; }
+    input:focus,textarea.query:focus,select:focus { border-color:#84a5ee; box-shadow:0 0 0 3px #2759d817; }
+    .upload-actions { display:flex; align-items:center; gap:10px; margin-top:15px; }
+    .status { min-height:17px; margin:10px 0 0; color:var(--muted); font-size:11px; white-space:pre-wrap; }
+    .status.error { color:var(--red); }
+    .status.ok { color:var(--green); }
+    .steps { display:grid; gap:9px; }
+    .step { display:grid; grid-template-columns:27px 1fr; gap:9px; align-items:center; padding:10px; border:1px solid #edf0f5; border-radius:9px; }
+    .step-no { width:24px; height:24px; display:grid; place-items:center; border-radius:8px; color:#70809a; background:#f1f4f8; font-size:10px; font-weight:800; }
+    .step.done .step-no { color:var(--green); background:#e7f6ef; }
+    .step b { display:block; font-size:11px; }
+    .step small { color:var(--muted); font-size:10px; }
+    .doc-list,.hit-list { display:grid; gap:9px; margin-top:13px; }
+    .doc-card,.hit-card { padding:12px; border:1px solid var(--line); border-radius:9px; background:#fff; }
+    .doc-card b,.hit-card b { font-size:11px; }
+    .doc-card small,.hit-card small { display:block; margin-top:4px; color:var(--muted); font-size:10px; }
+    .hit-card p { margin:8px 0 0; color:#42506a; font-size:11px; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .badge { display:inline-block; margin:5px 4px 0 0; padding:2px 7px; border-radius:99px; color:#45618e; background:#edf3ff; font-size:9px; font-weight:750; }
+    .grid-4 { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:15px; }
+    .metric { padding:13px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+    .metric-label { color:var(--muted); font-size:10px; }
+    .metric-value { margin-top:4px; font-size:22px; font-weight:780; letter-spacing:-.05em; }
+    .metric-note { color:#97a1af; font-size:9px; }
+    .table { width:100%; border-collapse:collapse; font-size:11px; }
+    .table th,.table td { padding:10px 8px; border-bottom:1px solid #edf0f5; text-align:left; }
+    .table th { color:#8994a6; font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; }
+    .bar-row { display:grid; grid-template-columns:95px 1fr 28px; gap:10px; align-items:center; margin:10px 0; font-size:10px; }
+    .bar-track { height:7px; overflow:hidden; border-radius:99px; background:#edf1f7; }
+    .bar-fill { height:100%; border-radius:99px; background:linear-gradient(90deg,#5986ee,#2d60d8); }
+    .graph-layout { display:grid; grid-template-columns:minmax(0,1fr) 220px; gap:12px; }
+    .evidence-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:13px; align-items:start; }
+    .graph-canvas { min-height:430px; overflow:hidden; border:1px solid var(--line); border-radius:11px; background:radial-gradient(ellipse at center,#fff 0,#fbfcff 80%); }
+    .graph-canvas svg { width:100%; height:430px; }
+    .graph-node { stroke:#fff; stroke-width:2; }
+    .graph-edge { stroke:#bdc8d8; stroke-width:1.6; opacity:.7; }
+    .graph-label { fill:#34435b; font-size:10px; text-anchor:middle; }
+    .graph-legend { display:grid; gap:7px; max-height:420px; overflow:auto; }
+    .entity-item { display:flex; justify-content:space-between; gap:8px; padding:8px; border:1px solid #edf0f5; border-radius:8px; font-size:10px; }
+    .entity-item span:last-child { color:#8a96a8; }
+    .notice { padding:14px; border:1px solid #f0e2bd; border-radius:9px; color:#72551b; background:#fff9e9; font-size:11px; }
+    .policy-card { display:grid; grid-template-columns:145px minmax(0,1fr); gap:13px; align-items:center; padding:13px 0; border-bottom:1px solid #edf0f5; }
+    .policy-card:last-child { border-bottom:0; }
+    .policy-tag { display:inline-flex; width:max-content; padding:4px 8px; border-radius:99px; color:#47638f; background:#edf3ff; font-size:9px; font-weight:800; }
+    .policy-card.active .policy-tag { color:#fff; background:var(--green); }
+    .policy-card b { display:block; font-size:11px; }
+    .policy-card p { margin:3px 0 0; color:var(--muted); font-size:10px; }
+    .rightbar { position:sticky; top:0; height:100vh; padding:20px 14px; overflow:auto; border-left:1px solid var(--line); background:#fff; }
+    .right-heading { display:flex; justify-content:space-between; align-items:center; margin:1px 3px 12px; font-size:11px; font-weight:800; }
+    .side-section { margin-bottom:18px; }
+    .side-label { margin:0 3px 7px; color:#98a1b0; font-size:9px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
+    .side-card { padding:10px; margin-top:6px; border:1px solid #edf0f5; border-radius:9px; background:#fff; }
+    .side-card span { display:block; color:#8591a3; font-size:9px; }
+    .side-card b { display:block; margin-top:2px; color:#35435a; font-size:11px; font-weight:750; overflow-wrap:anywhere; }
+    .dot { display:inline-block; width:7px; height:7px; margin-right:5px; border-radius:50%; background:#d59b31; }
+    .dot.on { background:#23a274; }
+    .empty { padding:17px; border:1px dashed #dce3ed; border-radius:9px; color:#8591a3; background:#fbfcfe; text-align:center; font-size:11px; }
+    .toast { position:fixed; right:18px; bottom:18px; z-index:10; max-width:min(400px,calc(100vw - 36px)); padding:11px 14px; border-radius:9px; color:#fff; background:#263b62; box-shadow:var(--shadow); font-size:11px; opacity:0; transform:translateY(8px); pointer-events:none; transition:.2s; }
+    .toast.show { opacity:1; transform:none; }
+    @media(max-width:1180px) { .shell { grid-template-columns:190px minmax(0,1fr); } .rightbar { display:none; } .workspace { padding-left:24px; padding-right:24px; } .topbar { margin-left:-24px; margin-right:-24px; padding:0 24px; } }
+    @media(max-width:760px) { .shell { display:block; } .sidebar { position:sticky; height:auto; padding:8px 10px; border-right:0; border-bottom:1px solid var(--line); } .brand { display:none; } .nav-label,.sidebar-bottom { display:none; } .nav { display:flex; overflow:auto; gap:5px; } .nav button { width:auto; flex:0 0 auto; padding:8px 10px; } .nav-icon { display:none; } .nav-pill { display:none; } .workspace { padding:0 14px 35px; } .topbar { min-height:55px; margin:0 -14px 19px; padding:0 14px; } .session { display:none; } .pipeline-grid,.graph-layout,.evidence-grid { grid-template-columns:1fr; } .grid-4 { grid-template-columns:repeat(2,minmax(0,1fr)); } .graph-canvas,.graph-canvas svg { min-height:320px; height:320px; } .graph-legend { max-height:180px; } .policy-card { grid-template-columns:1fr; gap:5px; } .welcome { padding-top:25px; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark">✦</div><div><div class="brand-name">AstroRAG</div><div class="brand-sub">Scientific verification</div></div></div>
+      <div class="nav-label">Workspace</div>
+      <nav class="nav" aria-label="Main navigation">
+        <button class="active" data-view="chat"><span class="nav-icon">◉</span>Chat</button>
+        <button data-view="pipeline"><span class="nav-icon">▷</span>Pipeline</button>
+        <button data-view="metrics"><span class="nav-icon">▥</span>Metrics</button>
+        <button data-view="graph"><span class="nav-icon">⌘</span>Graph</button>
+        <button data-view="evidence"><span class="nav-icon">▤</span>Evidence</button>
+        <button data-view="policy"><span class="nav-icon">≋</span>Policy</button>
+      </nav>
+      <div class="sidebar-bottom">Astronomy-only · Evidence first<br>Session data is kept separate</div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div class="top-title" id="top-title">Chat</div>
+        <div class="top-actions"><span class="session" id="session-label"></span><button class="icon-btn" id="new-session" title="Start a clean session" aria-label="Start a clean session">↻</button><button class="btn primary" id="run-pipeline">＋ Run pipeline</button></div>
+      </header>
+
+      <section class="view active" id="view-chat">
+        <div class="chat-wrap">
+          <div class="welcome" id="welcome">
+            <div class="welcome-mark">✦</div><div class="eyebrow">Astronomy evidence assistant</div>
+            <h1>Explore your astronomy sources</h1>
+            <p>Ask a question about documents in this session. AstroRAG retrieves passages, drafts a sourced response, and checks each claim separately.</p>
+            <div class="suggestions"><button data-question="What are the main findings in this astronomy paper?">Summarize a paper</button><button data-question="What value does the source report, and on which page?">Find a reported value</button><button data-question="How are the object and observing instrument related?">Explore a relationship</button></div>
+          </div>
+          <div class="chat-log" id="chat-log" aria-live="polite"></div>
+          <form class="composer" id="chat-form">
+            <textarea id="chat-question" maxlength="2000" placeholder="Ask an astronomy question…" required></textarea>
+            <div class="composer-foot"><label class="check-inline"><input id="include-scholarly" type="checkbox"> Search arXiv abstracts too</label><div><span class="composer-hint">Answers use retrieved evidence · review uncertain claims</span> <button class="btn primary" id="send-question" type="submit">Ask ↗</button></div></div>
+          </form>
+        </div>
+      </section>
+
+      <section class="view" id="view-pipeline">
+        <div class="page-head"><div class="eyebrow">Document processing</div><h1>Pipeline</h1><p class="intro">Upload astronomy sources to extract text, run optional OCR, create chunks, and index evidence for retrieval.</p></div>
+        <div class="pipeline-grid">
+          <section class="panel"><h2>Add astronomy sources</h2><p class="panel-sub">Supported: PDF, DOCX, HTML, text, Markdown, PNG, JPG, WEBP · max size is configured by the server.</p>
+            <form id="upload-form"><label class="drop" for="files"><div class="drop-icon">⇧</div><strong>Choose files to ingest</strong><span>Files are stored in this session's evidence collection</span><input id="files" name="files" type="file" multiple accept=".pdf,.docx,.html,.htm,.txt,.md,.png,.jpg,.jpeg,.webp"></label>
+              <label class="field-label" for="source-tier">Source category</label><select id="source-tier" name="source_tier"><option value="t0_user">User document · T0</option><option value="t1_scholarly">Scholarly · T1</option><option value="t2_reference">Reference work · T2</option><option value="t3_web">General web · T3</option></select>
+              <label class="field-label" for="upload-question">Optional research question</label><input id="upload-question" type="text" maxlength="20000" placeholder="Save a question with this ingestion">
+              <div class="upload-actions"><button class="btn primary" id="upload-button" type="submit">Upload and process</button><span class="composer-hint" id="file-count">No files selected</span></div><p class="status" id="upload-status" role="status" aria-live="polite"></p>
+            </form>
+          </section>
+          <section class="panel"><h2>Processing stages</h2><p class="panel-sub">The upload API runs these stages in order.</p><div class="steps"><div class="step" id="step-upload"><span class="step-no">1</span><div><b>Receive and preserve</b><small>Validate file type and size; keep the original</small></div></div><div class="step" id="step-extract"><span class="step-no">2</span><div><b>Extract text</b><small>Read document pages and optional OCR text</small></div></div><div class="step" id="step-chunk"><span class="step-no">3</span><div><b>Chunk and index</b><small>Retain page provenance; build search indexes</small></div></div><div class="step" id="step-graph"><span class="step-no">4</span><div><b>Link graph evidence</b><small>Optional astronomy entities in configured Neo4j</small></div></div></div></section>
+        </div>
+        <div class="panel" style="margin-top:14px"><h2>Documents in this session</h2><div class="doc-list" id="document-list"><div class="empty">No astronomy sources uploaded in this session yet.</div></div></div>
+      </section>
+
+      <section class="view" id="view-metrics">
+        <div class="page-head"><div class="eyebrow">Session measurements</div><h1>Metrics</h1><p class="intro">Counts and chunking details calculated from this session's indexed documents.</p></div>
+        <div class="grid-4" id="metric-cards"></div>
+        <section class="panel"><h2>Chunk kinds</h2><p class="panel-sub">Classification of extracted text chunks; it does not measure scientific correctness.</p><div id="kind-bars"></div></section>
+        <section class="panel" style="margin-top:13px"><h2>Document metrics</h2><div style="overflow:auto"><table class="table"><thead><tr><th>Document</th><th>Parser</th><th>Pages</th><th>Chunks</th><th>Trust label</th></tr></thead><tbody id="metrics-docs"></tbody></table></div></section>
+      </section>
+
+      <section class="view" id="view-graph">
+        <div class="page-head"><div class="eyebrow">Knowledge connections</div><h1>Astronomy graph</h1><p class="intro">Entities and evidence-linked co-occurrences extracted from this session's documents.</p></div>
+        <div class="grid-4" id="graph-cards"></div>
+        <div class="graph-layout"><div class="graph-canvas" id="graph-canvas"><div class="empty" style="margin:18px">Loading session graph…</div></div><section class="panel"><h2>Entities</h2><p class="panel-sub">Named astronomy objects and instruments found in indexed chunks.</p><div class="graph-legend" id="graph-legend"></div></section></div>
+        <p class="status" id="graph-status"></p>
+      </section>
+
+      <section class="view" id="view-evidence">
+        <div class="page-head"><div class="eyebrow">Source inspection</div><h1>Evidence</h1><p class="intro">Search passages directly and inspect their document, page, chunk, and source-tier provenance.</p></div>
+        <section class="panel"><form id="evidence-form"><label class="field-label" for="evidence-query">Search this session</label><div style="display:flex;gap:8px"><input id="evidence-query" type="text" maxlength="2000" placeholder="Try an astronomy object, identifier, or measurement" required><button class="btn primary" type="submit">Search</button></div><p class="status" id="evidence-status" role="status" aria-live="polite"></p></form></section>
+        <div class="evidence-grid"><section class="panel"><h2>Text and vector evidence</h2><p class="panel-sub">Passages found through BM25 and optional semantic search.</p><div class="hit-list" id="evidence-results"><div class="empty">Search results will appear here.</div></div></section><section class="panel"><h2>Graph evidence</h2><p class="panel-sub">Passages returned by Neo4j entity and relationship lookup.</p><div class="hit-list" id="graph-evidence-results"><div class="empty">Graph results will appear here when Neo4j is configured.</div></div></section></div>
+      </section>
+
+      <section class="view" id="view-policy">
+        <div class="page-head"><div class="eyebrow">Explainable routing</div><h1>Retrieval policy</h1><p class="intro">The current router selects a retrieval path from the query and available services. These are real code rules, not learned Q-values.</p></div>
+        <section class="panel"><h2>Route rules</h2><p class="panel-sub">The first matching configured route is used. No extra LLM call is needed to route a query.</p><div id="policy-routes"></div></section>
+        <section class="panel" style="margin-top:13px"><h2>Most recent route</h2><div class="side-card"><span>Question</span><b id="policy-query">No query yet</b></div><div class="side-card"><span>Selected method</span><b id="policy-method">—</b></div><div class="side-card"><span>Reason</span><b id="policy-reason">Ask or search a question to see its actual routing decision.</b></div></section>
+      </section>
+    </main>
+
+    <aside class="rightbar">
+      <div class="right-heading"><span>Session snapshot</span><button class="icon-btn" id="refresh-data" title="Refresh session data" aria-label="Refresh session data">↻</button></div>
+      <div class="side-section"><div class="side-label">Corpus</div><div class="side-card"><span>Words</span><b id="side-words">0</b></div><div class="side-card"><span>Documents</span><b id="side-documents">0</b></div><div class="side-card"><span>Pages / chunks</span><b id="side-pages-chunks">0 / 0</b></div></div>
+      <div class="side-section"><div class="side-label">Graph nodes</div><div class="side-card"><span>Recognized astronomy entities</span><b id="side-entities">0</b></div><div class="side-card"><span>Evidence-linked relations</span><b id="side-relations">0</b></div></div>
+      <div class="side-section"><div class="side-label">Current answer</div><div class="side-card"><span>Retrieval method</span><b id="side-route">Awaiting a question</b></div><div class="side-card"><span>Embedding backend</span><b id="side-embedding">Checking…</b></div><div class="side-card"><span>Generation / verifier</span><b id="side-models">Checking…</b></div><div class="side-card"><span>OCR</span><b id="side-ocr">Checking…</b></div></div>
+      <div class="side-section"><div class="side-label">Session</div><div class="side-card"><span>Identifier</span><b id="side-session">—</b></div></div>
+    </aside>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const SESSION_KEY = "astronomy-rag-session-v2";
+    const makeId = () => crypto.randomUUID ? crypto.randomUUID() : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); });
+    const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+    let sessionId = localStorage.getItem(SESSION_KEY) || makeId();
+    let capabilities = {};
+    let snapshot = {};
+    let graphData = {};
+    let lastRoute = null;
+    const names = {chat:"Chat",pipeline:"Pipeline",metrics:"Metrics",graph:"Graph",evidence:"Evidence",policy:"Policy"};
+    const get = id => document.getElementById(id);
+    const api = async (url, options={}) => { const response = await fetch(url, options); const data = await response.json(); if (!response.ok) throw new Error(data.detail || `Request failed (${response.status})`); return data; };
+    const showToast = message => { const toast = get("toast"); toast.textContent = message; toast.classList.add("show"); setTimeout(() => toast.classList.remove("show"), 3600); };
+    const sessionUrl = suffix => `/sessions/${encodeURIComponent(sessionId)}${suffix}`;
+
+    function activate(view) {
+      document.querySelectorAll(".view").forEach(el => el.classList.toggle("active", el.id === `view-${view}`));
+      document.querySelectorAll(".nav button").forEach(button => button.classList.toggle("active", button.dataset.view === view));
+      get("top-title").textContent = names[view] || "Chat";
+      if (view === "pipeline") refreshSnapshot();
+      if (view === "metrics") refreshSnapshot();
+      if (view === "graph") refreshGraph();
+      if (view === "policy") refreshPolicy();
+    }
+    function setSession(id) {
+      sessionId = id;
+      localStorage.setItem(SESSION_KEY, id);
+      get("session-label").textContent = `Session ${id.slice(0,8)}…`;
+      get("side-session").textContent = id;
+      get("chat-log").replaceChildren();
+      get("welcome").hidden = false;
+      get("document-list").innerHTML = '<div class="empty">No astronomy sources uploaded in this session yet.</div>';
+      lastRoute = null;
+      renderLastRoute();
+      refreshAll();
+    }
+    async function refreshAll() {
+      await Promise.allSettled([refreshCapabilities(), refreshSnapshot(), refreshGraph()]);
+    }
+    async function refreshCapabilities() {
+      try {
+        capabilities = await api("/capabilities");
+        get("side-embedding").textContent = capabilities.embedding_backend === "local" ? "AstroBERT · local" : capabilities.embedding_backend === "api" ? "Hosted embeddings" : "BM25 only";
+        get("side-models").textContent = capabilities.generation_enabled ? `${capabilities.generation_model} / ${capabilities.verification_model || "verifier missing"}` : "Not configured";
+        get("side-ocr").innerHTML = `<span class="dot ${capabilities.tesseract_available ? "on" : ""}"></span>${capabilities.tesseract_available ? "Tesseract ready" : "Tesseract unavailable"}`;
+      } catch (error) { get("side-models").textContent = "Status unavailable"; }
+    }
+    async function refreshSnapshot() {
+      try {
+        snapshot = await api(sessionUrl("/snapshot"));
+        get("side-words").textContent = Number(snapshot.word_count || 0).toLocaleString();
+        get("side-documents").textContent = Number(snapshot.document_count || 0).toLocaleString();
+        get("side-pages-chunks").textContent = `${snapshot.page_count || 0} / ${snapshot.chunk_count || 0}`;
+        renderMetrics(); renderDocuments();
+      } catch (error) { showToast(`Could not load session metrics: ${error.message}`); }
+    }
+    async function refreshGraph() {
+      try {
+        graphData = await api(sessionUrl("/graph"));
+        get("side-entities").textContent = graphData.enabled ? Number(graphData.entity_count || 0).toLocaleString() : "Not connected";
+        get("side-relations").textContent = graphData.enabled ? Number(graphData.relationship_count || 0).toLocaleString() : "Not connected";
+        renderGraph();
+      } catch (error) {
+        get("side-entities").textContent = "Unavailable"; get("side-relations").textContent = "Unavailable";
+        get("graph-status").textContent = error.message;
+      }
+    }
+    async function refreshPolicy() {
+      try {
+        const policy = await api("/routing/policy");
+        get("policy-routes").innerHTML = policy.routes.map(route => `<div class="policy-card ${lastRoute?.method === route.method ? "active" : ""}"><span class="policy-tag">${escapeHtml(route.method)}</span><div><b>When this route applies</b><p>${escapeHtml(route.when)} ${escapeHtml(route.action)}</p></div></div>`).join("") + `<p class="panel-sub" style="margin-top:12px">${escapeHtml(policy.learning)}</p>`;
+        renderLastRoute();
+      } catch (error) { get("policy-routes").innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`; }
+    }
+    function renderLastRoute() {
+      get("side-route").textContent = lastRoute?.method || "Awaiting a question";
+      get("policy-query").textContent = lastRoute?.query || "No query yet";
+      get("policy-method").textContent = lastRoute?.method || "—";
+      get("policy-reason").textContent = lastRoute?.reason || "Ask or search a question to see its actual routing decision.";
+      document.querySelectorAll(".policy-card").forEach(card => card.classList.toggle("active", card.querySelector(".policy-tag")?.textContent === lastRoute?.method));
+    }
+    function renderMetrics() {
+      const data = snapshot || {};
+      const cards = [["Words",data.word_count || 0,"Counted in indexed chunks"],["Pages",data.page_count || 0,"Source page count"],["Chunks",data.chunk_count || 0,"Searchable passages"],["Embedded",data.embedded_chunk_count || 0,"Chunks with vectors"]];
+      get("metric-cards").innerHTML = cards.map(([label,value,note]) => `<div class="metric"><div class="metric-label">${label}</div><div class="metric-value">${Number(value).toLocaleString()}</div><div class="metric-note">${note}</div></div>`).join("");
+      const kinds = data.chunk_kinds || {}; const total = Math.max(1,Object.values(kinds).reduce((a,b)=>a+b,0));
+      get("kind-bars").innerHTML = Object.keys(kinds).length ? Object.entries(kinds).map(([kind,count]) => `<div class="bar-row"><span>${escapeHtml(kind)}</span><div class="bar-track"><div class="bar-fill" style="width:${Math.max(2,100*count/total)}%"></div></div><span>${count}</span></div>`).join("") : '<div class="empty">No chunks are indexed yet.</div>';
+      get("metrics-docs").innerHTML = (data.documents || []).length ? data.documents.map(doc => `<tr><td>${escapeHtml(doc.filename)}</td><td>${escapeHtml(doc.parser)}</td><td>${doc.page_count}</td><td>${doc.chunk_count}</td><td>${escapeHtml(doc.source_tier)}</td></tr>`).join("") : '<tr><td colspan="5">No documents in this session.</td></tr>';
+    }
+    function renderDocuments() {
+      const docs = snapshot.documents || [];
+      get("document-list").innerHTML = docs.length ? docs.map(doc => `<article class="doc-card"><b>${escapeHtml(doc.filename)}</b><small>${escapeHtml(doc.parser)} · ${doc.page_count} page(s) · ${doc.chunk_count} chunk(s) · ${escapeHtml(doc.source_tier)}</small></article>`).join("") : '<div class="empty">No astronomy sources uploaded in this session yet.</div>';
+    }
+    function renderGraph() {
+      const data = graphData || {};
+      get("graph-cards").innerHTML = [["Entities",data.entity_count || 0],["Relations",data.relationship_count || 0],["Graph store",data.enabled ? "Connected" : "Optional"]].map(([label,value]) => `<div class="metric"><div class="metric-label">${label}</div><div class="metric-value" style="font-size:19px">${typeof value === "number" ? value.toLocaleString() : escapeHtml(value)}</div></div>`).join("");
+      const entities = data.entities || []; const relationships = data.relationships || [];
+      get("graph-legend").innerHTML = entities.length ? entities.map(entity => `<div class="entity-item"><span>${escapeHtml(entity.name)}</span><span>${entity.mentions} mention(s)</span></div>`).join("") : '<div class="empty">No graph entities to show.</div>';
+      if (!data.enabled) { get("graph-canvas").innerHTML = '<div class="notice" style="margin:18px"><b>Neo4j is not connected.</b><br>This graph view uses real session graph data. Configure NEO4J_URI, NEO4J_USER, and NEO4J_PASSWORD, restart the API, then upload sources again to populate it. The rest of the RAG works without Neo4j.</div>'; return; }
+      if (!entities.length) { get("graph-canvas").innerHTML = '<div class="empty" style="margin:18px">No recognized astronomy entities yet. Upload a source mentioning names such as NGC 123, Gaia DR3, Chandra, or JWST.</div>'; return; }
+      const width=760,height=430,cx=width/2,cy=height/2,rx=Math.min(width*.41,entities.length<4?115:280),ry=Math.min(height*.39,entities.length<4?100:165);
+      const points=new Map(entities.map((item,i)=>{const a=(2*Math.PI*i/Math.max(1,entities.length))-(Math.PI/2);return[item.id,{x:cx+rx*Math.cos(a),y:cy+ry*Math.sin(a)}]}));
+      const colors=["#5786e8","#32a37a","#9165d5","#e29145","#28a0a3","#df6a82","#5274ac"];
+      const colorFor=name=>{let h=0;for(const c of name)h=(h*31+c.charCodeAt(0))|0;return colors[Math.abs(h)%colors.length]};
+      const edges=relationships.filter(edge=>points.has(edge.source)&&points.has(edge.target)).map(edge=>{const a=points.get(edge.source),b=points.get(edge.target);return `<line class="graph-edge" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`}).join("");
+      const nodes=entities.map(entity=>{const p=points.get(entity.id),r=Math.min(19,10+Math.sqrt(entity.mentions||1)*2);return `<g><circle class="graph-node" cx="${p.x}" cy="${p.y}" r="${r}" fill="${colorFor(entity.name)}"/><text class="graph-label" x="${p.x}" y="${p.y+r+13}">${escapeHtml(entity.name.slice(0,24))}</text></g>`}).join("");
+      get("graph-canvas").innerHTML=`<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Astronomy entity graph">${edges}${nodes}</svg>`;
+      get("graph-status").textContent=`Showing ${entities.length} session entities and ${relationships.length} evidence-linked co-occurrence relationships. A co-occurrence is not proof of causation.`;
+    }
+    function citationLabel(id,sources) { const source=sources[id]||{}; const label=source.filename?`${source.filename}, page ${source.page}`:(source.title||id); return source.url&&source.url.startsWith("https://")?`<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`:escapeHtml(label); }
+    function renderHits(hits,container) {
+      container.innerHTML=hits.length?hits.map(hit=>`<article class="hit-card"><b>${escapeHtml(hit.filename)}</b><span class="badge">${escapeHtml(hit.source_tier)}</span><span class="badge">Page ${hit.page}</span><span class="badge">Chunk ${hit.chunk_order}</span><p>${escapeHtml(hit.text)}</p></article>`).join(""):'<div class="empty">No matching passages. Upload a source or adjust the query.</div>';
+    }
+    async function retrieve(query) {
+      const data=await api(sessionUrl(`/retrieve?q=${encodeURIComponent(query)}&limit=6`));
+      lastRoute={query,method:data.retrieval_method,reason:data.route_reason};renderLastRoute();
+      get("evidence-status").textContent=`${data.hits.length} passage(s) · ${data.retrieval_method} · ${data.route_reason}`;
+      renderHits(data.hits,get("evidence-results"));
+      return data;
+    }
+    function renderAnswer(data) {
+      const block=document.createElement("div");block.className="assistant-block";
+      const claims=data.segments.map(segment=>`<article class="claim ${escapeHtml(segment.verdict)}"><div class="claim-top"><span class="verdict ${escapeHtml(segment.verdict)}">${escapeHtml(segment.verdict)}</span></div><p class="claim-text">${escapeHtml(segment.text)}</p><div class="claim-meta"><strong>Draft sources:</strong> ${segment.citations.map(id=>citationLabel(id,data.sources)).join(" · ")||"None"}<br><strong>Verifier evidence:</strong> ${segment.verification_citations.map(id=>citationLabel(id,data.sources)).join(" · ")||"None"}<br><strong>Verifier note:</strong> ${escapeHtml(segment.verification_notes||"No note supplied")}</div></article>`).join("");
+      block.innerHTML=`<div class="assistant-mark">✦</div><div class="answer-card"><p>Here is an evidence-based response. Review the claim verdicts and source passages below.</p>${claims}<div class="answer-meta">Draft: ${escapeHtml(data.generation_model)} · Verifier: ${escapeHtml(data.verification_model)} · <a href="${sessionUrl(`/audit/${encodeURIComponent(data.audit_log_id)}`)}" target="_blank" rel="noopener noreferrer">Open audit record</a></div></div>`;
+      get("chat-log").append(block);get("welcome").hidden=true;
+    }
+
+    document.querySelectorAll(".nav button").forEach(button=>button.addEventListener("click",()=>activate(button.dataset.view)));
+    get("new-session").addEventListener("click",()=>{setSession(makeId());showToast("Started a new isolated session.")});
+    get("refresh-data").addEventListener("click",refreshAll);
+    get("run-pipeline").addEventListener("click",()=>{activate("pipeline");get("files").focus()});
+    document.querySelectorAll(".suggestions button").forEach(button=>button.addEventListener("click",()=>{get("chat-question").value=button.dataset.question;get("chat-question").focus()}));
+    get("files").addEventListener("change",event=>{const files=[...event.target.files];get("file-count").textContent=files.length?`${files.length} file(s) selected`:"No files selected"});
+    get("upload-form").addEventListener("submit",async event=>{
+      event.preventDefault();const files=[...get("files").files];if(!files.length){get("upload-status").textContent="Choose at least one file first.";get("upload-status").className="status error";return}
+      const button=get("upload-button");button.disabled=true;get("upload-status").textContent="Uploading, extracting text, and indexing…";get("upload-status").className="status";
+      ["step-upload","step-extract","step-chunk"].forEach(id=>get(id).classList.remove("done"));
+      const body=new FormData();const question=get("upload-question").value.trim();if(question)body.append("question",question);body.append("source_tier",get("source-tier").value);for(const file of files)body.append("files",file,file.name);
+      try{const data=await api(sessionUrl("/inputs"),{method:"POST",body});["step-upload","step-extract","step-chunk"].forEach(id=>get(id).classList.add("done"));if(capabilities.graph_enabled)get("step-graph").classList.add("done");
+        get("upload-status").textContent=data.documents.map(doc=>`${doc.filename}: ${doc.chunk_count} chunk(s), ${doc.page_count} page(s) · ${doc.parser} · OCR ${doc.ocr_status}`).join("\n");get("upload-status").className="status ok";get("files").value="";get("file-count").textContent="No files selected";await Promise.all([refreshSnapshot(),refreshGraph()]);showToast("Ingestion completed. You can now ask questions about these sources.");
+      }catch(error){get("upload-status").textContent=error.message;get("upload-status").className="status error";showToast(`Ingestion failed: ${error.message}`)}finally{button.disabled=false}
+    });
+    get("chat-form").addEventListener("submit",async event=>{
+      event.preventDefault();const question=get("chat-question").value.trim();if(!question)return;const log=get("chat-log");const user=document.createElement("div");user.className="user-bubble";user.textContent=question;log.append(user);get("welcome").hidden=true;get("chat-question").value="";const button=get("send-question");button.disabled=true;
+      const waiting=document.createElement("div");waiting.className="assistant-block";waiting.innerHTML='<div class="assistant-mark">✦</div><div class="answer-card">Finding evidence and checking claims…</div>';log.append(waiting);waiting.scrollIntoView({behavior:"smooth",block:"center"});
+      try{await retrieve(question);const data=await api(sessionUrl("/answer"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question,include_scholarly:get("include-scholarly").checked})});waiting.remove();renderAnswer(data);log.lastElementChild.scrollIntoView({behavior:"smooth",block:"center"});}
+      catch(error){waiting.innerHTML=`<div class="assistant-mark">!</div><div class="answer-card">${escapeHtml(error.message)}<div class="answer-meta">Check that this session has indexed evidence and that answer and verifier models are configured.</div></div>`;}
+      finally{button.disabled=false}
+    });
+    get("evidence-form").addEventListener("submit",async event=>{event.preventDefault();const query=get("evidence-query").value.trim();if(!query)return;get("evidence-status").textContent="Searching text, vector, and graph evidence…";try{const data=await retrieve(query);const graph=await api(sessionUrl(`/graph/search?q=${encodeURIComponent(query)}&limit=6`));renderHits(graph.hits,get("graph-evidence-results"));get("evidence-status").className="status ok";get("evidence-status").textContent=`Text/vector: ${data.hits.length} · Graph: ${graph.hits.length} · Route: ${data.retrieval_method} — ${data.route_reason}`;}catch(error){get("evidence-status").className="status error";get("evidence-status").textContent=error.message;}});
+    setSession(sessionId);
+  </script>
+</body>
+</html>

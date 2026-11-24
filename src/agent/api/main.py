@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
-import shutil
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
@@ -29,10 +29,12 @@ from agent.retrieval.graph import (
     GraphServiceError,
     graph_enabled,
     index_evidence_batch,
-    snapshot as graph_snapshot,
 )
 from agent.retrieval.graph import (
     search as graph_search,
+)
+from agent.retrieval.graph import (
+    snapshot as graph_snapshot,
 )
 from agent.retrieval.planning import plan_queries, rerank
 from agent.retrieval.routing import choose_route
@@ -250,7 +252,10 @@ def routing_policy() -> dict[str, Any]:
         "routes": [
             {
                 "method": "graph_hybrid",
-                "when": "A relation question or supported astronomy/catalog identifier is present, and Neo4j is configured.",
+                "when": (
+                    "A relation question or supported astronomy/catalog identifier is present, "
+                    "and Neo4j is configured."
+                ),
                 "action": "Combine graph evidence with BM25 and, when enabled, semantic retrieval.",
             },
             {
@@ -281,6 +286,20 @@ def session_graph(session_id: UUID) -> dict[str, Any]:
         return graph_snapshot(get_settings(), str(session_id))
     except GraphServiceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/sessions/{session_id}/graph/search")
+def session_graph_search(
+    session_id: UUID,
+    q: str = Query(min_length=1, max_length=2_000),
+    limit: int = Query(default=5, ge=1, le=20),
+) -> dict[str, Any]:
+    """Return graph-only evidence to let the Evidence view compare both channels."""
+    try:
+        hits = graph_search(get_settings(), str(session_id), q, limit)
+    except GraphServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"session_id": session_id, "query": q, "hits": hits}
 
 
 @app.post("/sessions/{session_id}/input-jobs", response_model=InputJobsResponse, status_code=202)
