@@ -106,6 +106,23 @@ class Catalog:
             "created_at": row["created_at"],
         }
 
+    def list_answer_history(self, session_id: UUID, limit: int) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute(
+                """SELECT id, details, created_at FROM audit_log
+                   WHERE session_id = ? AND event = 'answer_verified'
+                   ORDER BY created_at DESC LIMIT ?""",
+                (str(session_id), limit),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "details": json.loads(row["details"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
     def session_snapshot(self, session_id: UUID) -> dict[str, Any]:
         """Return session-scoped counts for the dashboard, never other sessions' data."""
         with self.connect() as db:
@@ -371,6 +388,23 @@ class PostgresCatalog:
                 (audit_id, session_id),
             ).fetchone()
         return dict(row) if row else None
+
+    def list_answer_history(self, session_id: UUID, limit: int) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute(
+                """SELECT id, details, created_at FROM audit_log
+                   WHERE session_id = %s AND event = 'answer_verified'
+                   ORDER BY created_at DESC LIMIT %s""",
+                (session_id, limit),
+            ).fetchall()
+        return [
+            {
+                "id": str(row["id"]),
+                "details": row["details"],
+                "created_at": str(row["created_at"]),
+            }
+            for row in rows
+        ]
 
     def session_snapshot(self, session_id: UUID) -> dict[str, Any]:
         """Return session-scoped counts for the dashboard, never other sessions' data."""

@@ -140,6 +140,21 @@ class AnswerResponse(BaseModel):
     audit_log_id: UUID
 
 
+class QueryHistoryItem(BaseModel):
+    audit_log_id: UUID
+    question: str
+    segments: list[AnswerSegment]
+    sources: dict[str, dict[str, Any]]
+    generation_model: str
+    verification_model: str
+    created_at: str
+
+
+class QueryHistoryResponse(BaseModel):
+    session_id: UUID
+    items: list[QueryHistoryItem]
+
+
 class AuditResponse(BaseModel):
     session_id: UUID
     audit_log_id: UUID
@@ -770,7 +785,7 @@ def answer(session_id: UUID, request: AnswerRequest) -> AnswerResponse:
             )
         except ModelServiceError as exc:
             raise HTTPException(
-                status_code=502, detail="Independent claim verification failed"
+                status_code=502, detail=f"Independent claim verification failed: {exc}"
             ) from exc
         allowed = {item["id"] for item in verification_evidence}
         verification_citations = [
@@ -820,6 +835,25 @@ def answer(session_id: UUID, request: AnswerRequest) -> AnswerResponse:
         generation_model=settings.llm_model,
         verification_model=settings.verification_model,
         audit_log_id=audit_id,
+    )
+
+
+@app.get("/sessions/{session_id}/history", response_model=QueryHistoryResponse)
+def query_history(
+    session_id: UUID,
+    limit: int = Query(default=50, ge=1, le=100),
+) -> QueryHistoryResponse:
+    entries = _catalog().list_answer_history(session_id, limit)
+    return QueryHistoryResponse(
+        session_id=session_id,
+        items=[
+            QueryHistoryItem(
+                audit_log_id=entry["id"],
+                created_at=entry["created_at"],
+                **entry["details"],
+            )
+            for entry in entries
+        ],
     )
 
 

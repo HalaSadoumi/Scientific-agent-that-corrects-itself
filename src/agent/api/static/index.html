@@ -76,6 +76,13 @@
     .claim-meta { padding-top:7px; border-top:1px solid #edf0f5; color:#788397; font-size:10px; overflow-wrap:anywhere; }
     .claim-meta strong { color:#536178; }
     .answer-meta { margin-top:9px; color:#8893a5; font-size:10px; }
+    .history-list { display:grid; gap:12px; }
+    .history-entry summary { cursor:pointer; list-style:none; }
+    .history-entry summary::-webkit-details-marker { display:none; }
+    .history-question { display:block; font-size:13px; font-weight:750; }
+    .history-meta { display:block; margin-top:3px; color:var(--muted); font-size:10px; }
+    .history-preview { display:block; margin-top:9px; color:#536178; font-size:11px; }
+    .history-result { margin-top:12px; }
     .composer { position:sticky; bottom:12px; z-index:2; padding:8px; border:1px solid #dae2ee; border-radius:14px; background:#fff; box-shadow:0 12px 34px #263b6218; }
     .composer textarea { display:block; width:100%; min-height:58px; max-height:180px; resize:vertical; padding:9px 10px; border:0; outline:0; color:var(--ink); background:transparent; font-size:13px; }
     .composer-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:2px 2px 0; }
@@ -161,6 +168,7 @@
       <div class="nav-label">Workspace</div>
       <nav class="nav" aria-label="Main navigation">
         <button class="active" data-view="chat"><span class="nav-icon">◉</span>Chat</button>
+        <button data-view="history"><span class="nav-icon">◷</span>History</button>
         <button data-view="pipeline"><span class="nav-icon">▷</span>Pipeline</button>
         <button data-view="metrics"><span class="nav-icon">▥</span>Metrics</button>
         <button data-view="graph"><span class="nav-icon">⌘</span>Graph</button>
@@ -190,6 +198,11 @@
             <div class="composer-foot"><label class="check-inline"><input id="include-scholarly" type="checkbox"> Search arXiv abstracts too</label><div><span class="composer-hint">Answers use retrieved evidence · review uncertain claims</span> <button class="btn primary" id="send-question" type="submit">Ask ↗</button></div></div>
           </form>
         </div>
+      </section>
+
+      <section class="view" id="view-history">
+        <div class="page-head"><div class="eyebrow">Saved answers</div><h1>Query history</h1><p class="intro">Questions and verified results from this session. Select a query to review its claims, verdicts, and sources.</p></div>
+        <div class="history-list" id="query-history-list"><div class="empty">Loading query history…</div></div>
       </section>
 
       <section class="view" id="view-pipeline">
@@ -253,7 +266,7 @@
     let snapshot = {};
     let graphData = {};
     let lastRoute = null;
-    const names = {chat:"Chat",pipeline:"Pipeline",metrics:"Metrics",graph:"Graph",evidence:"Evidence",policy:"Policy"};
+    const names = {chat:"Chat",history:"History",pipeline:"Pipeline",metrics:"Metrics",graph:"Graph",evidence:"Evidence",policy:"Policy"};
     const get = id => document.getElementById(id);
     const api = async (url, options={}) => { const response = await fetch(url, options); const data = await response.json(); if (!response.ok) throw new Error(data.detail || `Request failed (${response.status})`); return data; };
     const showToast = message => { const toast = get("toast"); toast.textContent = message; toast.classList.add("show"); setTimeout(() => toast.classList.remove("show"), 3600); };
@@ -263,6 +276,7 @@
       document.querySelectorAll(".view").forEach(el => el.classList.toggle("active", el.id === `view-${view}`));
       document.querySelectorAll(".nav button").forEach(button => button.classList.toggle("active", button.dataset.view === view));
       get("top-title").textContent = names[view] || "Chat";
+      if (view === "history") refreshHistory();
       if (view === "pipeline") refreshSnapshot();
       if (view === "metrics") refreshSnapshot();
       if (view === "graph") refreshGraph();
@@ -281,7 +295,7 @@
       refreshAll();
     }
     async function refreshAll() {
-      await Promise.allSettled([refreshCapabilities(), refreshSnapshot(), refreshGraph()]);
+      await Promise.allSettled([refreshCapabilities(), refreshSnapshot(), refreshGraph(), refreshHistory()]);
     }
     async function refreshCapabilities() {
       try {
@@ -357,6 +371,22 @@
     function renderHits(hits,container) {
       container.innerHTML=hits.length?hits.map(hit=>`<article class="hit-card"><b>${escapeHtml(hit.filename)}</b><span class="badge">${escapeHtml(hit.source_tier)}</span><span class="badge">Page ${hit.page}</span><span class="badge">Chunk ${hit.chunk_order}</span><p>${escapeHtml(hit.text)}</p></article>`).join(""):'<div class="empty">No matching passages. Upload a source or adjust the query.</div>';
     }
+    function renderClaims(segments,sources) {
+      return segments.map(segment=>`<article class="claim ${escapeHtml(segment.verdict)}"><div class="claim-top"><span class="verdict ${escapeHtml(segment.verdict)}">${escapeHtml(segment.verdict)}</span></div><p class="claim-text">${escapeHtml(segment.text)}</p><div class="claim-meta"><strong>Draft sources:</strong> ${segment.citations.map(id=>citationLabel(id,sources)).join(" · ")||"None"}<br><strong>Verifier evidence:</strong> ${segment.verification_citations.map(id=>citationLabel(id,sources)).join(" · ")||"None"}<br><strong>Verifier note:</strong> ${escapeHtml(segment.verification_notes||"No note supplied")}</div></article>`).join("");
+    }
+    async function refreshHistory() {
+      const list=get("query-history-list");
+      try {
+        const data=await api(sessionUrl("/history?limit=50"));
+        list.innerHTML=data.items.length?data.items.map((item,index)=>{
+          const preview=item.segments[0];
+          const date=new Date(item.created_at).toLocaleString();
+          return `<details class="panel history-entry" ${index===0?"open":""}><summary><span class="history-question">${escapeHtml(item.question)}</span><span class="history-meta">${escapeHtml(date)} · ${item.segments.length} claim(s)</span>${preview?`<span class="history-preview"><span class="verdict ${escapeHtml(preview.verdict)}">${escapeHtml(preview.verdict)}</span> · ${escapeHtml(preview.text)}</span>`:""}</summary><div class="history-result">${renderClaims(item.segments,item.sources)}<div class="answer-meta">Draft: ${escapeHtml(item.generation_model)} · Verifier: ${escapeHtml(item.verification_model)} · <a href="${sessionUrl(`/audit/${encodeURIComponent(item.audit_log_id)}`)}" target="_blank" rel="noopener noreferrer">Open audit record</a></div></div></details>`;
+        }).join(""):'<div class="empty">No answered queries in this session yet.</div>';
+      } catch(error) {
+        list.innerHTML=`<div class="empty">Could not load query history: ${escapeHtml(error.message)}</div>`;
+      }
+    }
     async function retrieve(query) {
       const data=await api(sessionUrl(`/retrieve?q=${encodeURIComponent(query)}&limit=6`));
       lastRoute={query,method:data.retrieval_method,reason:data.route_reason};renderLastRoute();
@@ -366,7 +396,7 @@
     }
     function renderAnswer(data) {
       const block=document.createElement("div");block.className="assistant-block";
-      const claims=data.segments.map(segment=>`<article class="claim ${escapeHtml(segment.verdict)}"><div class="claim-top"><span class="verdict ${escapeHtml(segment.verdict)}">${escapeHtml(segment.verdict)}</span></div><p class="claim-text">${escapeHtml(segment.text)}</p><div class="claim-meta"><strong>Draft sources:</strong> ${segment.citations.map(id=>citationLabel(id,data.sources)).join(" · ")||"None"}<br><strong>Verifier evidence:</strong> ${segment.verification_citations.map(id=>citationLabel(id,data.sources)).join(" · ")||"None"}<br><strong>Verifier note:</strong> ${escapeHtml(segment.verification_notes||"No note supplied")}</div></article>`).join("");
+      const claims=renderClaims(data.segments,data.sources);
       block.innerHTML=`<div class="assistant-mark">✦</div><div class="answer-card"><p>Here is an evidence-based response. Review the claim verdicts and source passages below.</p>${claims}<div class="answer-meta">Draft: ${escapeHtml(data.generation_model)} · Verifier: ${escapeHtml(data.verification_model)} · <a href="${sessionUrl(`/audit/${encodeURIComponent(data.audit_log_id)}`)}" target="_blank" rel="noopener noreferrer">Open audit record</a></div></div>`;
       get("chat-log").append(block);get("welcome").hidden=true;
     }
@@ -389,7 +419,7 @@
     get("chat-form").addEventListener("submit",async event=>{
       event.preventDefault();const question=get("chat-question").value.trim();if(!question)return;const log=get("chat-log");const user=document.createElement("div");user.className="user-bubble";user.textContent=question;log.append(user);get("welcome").hidden=true;get("chat-question").value="";const button=get("send-question");button.disabled=true;
       const waiting=document.createElement("div");waiting.className="assistant-block";waiting.innerHTML='<div class="assistant-mark">✦</div><div class="answer-card">Finding evidence and checking claims…</div>';log.append(waiting);waiting.scrollIntoView({behavior:"smooth",block:"center"});
-      try{await retrieve(question);const data=await api(sessionUrl("/answer"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question,include_scholarly:get("include-scholarly").checked})});waiting.remove();renderAnswer(data);log.lastElementChild.scrollIntoView({behavior:"smooth",block:"center"});}
+      try{await retrieve(question);const data=await api(sessionUrl("/answer"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question,include_scholarly:get("include-scholarly").checked})});waiting.remove();renderAnswer(data);await refreshHistory();log.lastElementChild.scrollIntoView({behavior:"smooth",block:"center"});}
       catch(error){waiting.innerHTML=`<div class="assistant-mark">!</div><div class="answer-card">${escapeHtml(error.message)}<div class="answer-meta">Check that this session has indexed evidence and that answer and verifier models are configured.</div></div>`;}
       finally{button.disabled=false}
     });

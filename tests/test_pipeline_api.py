@@ -305,6 +305,27 @@ def test_answer_checks_generated_citations_and_records_audit(tmp_path, monkeypat
     audit = client.get(f"/sessions/{session}/audit/{audit_id}")
     assert audit.status_code == 200
     assert audit.json()["details"]["segments"][0]["verdict"] == "supported"
+    history = client.get(f"/sessions/{session}/history")
+    assert history.status_code == 200
+    assert history.json()["items"][0]["audit_log_id"] == audit_id
+    assert history.json()["items"][0]["question"] == "What is Betelgeuse's mass?"
+    assert history.json()["items"][0]["segments"][0]["verdict"] == "supported"
+    isolated_history = client.get(f"/sessions/{uuid4()}/history")
+    assert isolated_history.status_code == 200
+    assert isolated_history.json()["items"] == []
+
+    def fail_verifier(*, model, **kwargs):
+        if model == "checker":
+            raise main.ModelServiceError("Model provider returned HTTP 429: quota exceeded")
+        return fake_chat_json(model=model, **kwargs)
+
+    monkeypatch.setattr(main, "chat_json", fail_verifier)
+    failed_answer = client.post(
+        f"/sessions/{session}/answer",
+        json={"question": "What is Betelgeuse's mass?"},
+    )
+    assert failed_answer.status_code == 502
+    assert "HTTP 429: quota exceeded" in failed_answer.json()["detail"]
 
 
 def test_scholarly_search_marks_results_as_scholarly(monkeypatch) -> None:

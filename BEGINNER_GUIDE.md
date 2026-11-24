@@ -174,7 +174,7 @@ While the server is running, open `http://127.0.0.1:8000/docs` in a browser. Fas
 
 Open `http://127.0.0.1:8000/` for the app-style interface. The left navigation changes between six views while keeping the same session:
 
-- **Chat** asks a question, previews retrieved context, displays answer claims, and shows the verifier's verdicts, citations, and audit record link.
+- **Chat** asks a question, previews retrieved context, displays answer claims, and shows the verifier's verdicts, citations, and audit record link. **History** lists saved questions and their verified results for the current session.
 - **Pipeline** uploads supported sources and reports the parser, pages, chunks, and OCR status returned by ingestion.
 - **Metrics** reads real per-session document, page, chunk, word, and vector counts from the catalog. It also lists document parsers and chunk kinds.
 - **Graph** visualizes the current session's Neo4j entity and co-occurrence snapshot. When Neo4j is not configured, it explains how to enable it rather than drawing sample data.
