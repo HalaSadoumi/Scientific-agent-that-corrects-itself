@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -5,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from agent.api import main
 from agent.api.main import app
+from agent.config import PROJECT_ROOT, Settings
 from agent.storage.catalog import Catalog
 
 client = TestClient(app)
@@ -14,6 +16,16 @@ def test_health_returns_ok() -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+def test_settings_paths_are_project_rooted(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DATA_DIR", raising=False)
+
+    settings = Settings(_env_file=None, data_dir="custom-data")
+
+    assert Path(settings.data_dir) == PROJECT_ROOT / "custom-data"
+    assert Settings.model_config["env_file"] == PROJECT_ROOT / ".env"
 
 
 def test_frontend_contains_answer_generation_panel() -> None:

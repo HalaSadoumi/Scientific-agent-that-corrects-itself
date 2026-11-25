@@ -841,7 +841,7 @@ def answer(session_id: UUID, request: AnswerRequest) -> AnswerResponse:
 @app.get("/sessions/{session_id}/history", response_model=QueryHistoryResponse)
 def query_history(
     session_id: UUID,
-    limit: int = Query(default=50, ge=1, le=100),
+    limit: int | None = Query(default=None, ge=1, le=100),
 ) -> QueryHistoryResponse:
     entries = _catalog().list_answer_history(session_id, limit)
     return QueryHistoryResponse(

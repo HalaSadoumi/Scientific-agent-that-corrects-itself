@@ -377,7 +377,7 @@
     async function refreshHistory() {
       const list=get("query-history-list");
       try {
-        const data=await api(sessionUrl("/history?limit=50"));
+        const data=await api(sessionUrl("/history"));
         list.innerHTML=data.items.length?data.items.map((item,index)=>{
           const preview=item.segments[0];
           const date=new Date(item.created_at).toLocaleString();

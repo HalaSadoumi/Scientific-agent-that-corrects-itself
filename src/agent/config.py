@@ -1,13 +1,16 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=PROJECT_ROOT / ".env", extra="ignore")
 
     app_env: str = "dev"
 
@@ -57,6 +60,14 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_model: str | None = None
     verification_model: str | None = None
+
+    @field_validator("data_dir")
+    @classmethod
+    def resolve_data_dir(cls, value: str) -> str:
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = PROJECT_ROOT / path
+        return str(path.resolve())
 
     @property
     def database_url(self) -> str:

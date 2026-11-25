@@ -106,14 +106,18 @@ class Catalog:
             "created_at": row["created_at"],
         }
 
-    def list_answer_history(self, session_id: UUID, limit: int) -> list[dict[str, Any]]:
-        with self.connect() as db:
-            rows = db.execute(
-                """SELECT id, details, created_at FROM audit_log
+    def list_answer_history(
+        self, session_id: UUID, limit: int | None = None
+    ) -> list[dict[str, Any]]:
+        query = """SELECT id, details, created_at FROM audit_log
                    WHERE session_id = ? AND event = 'answer_verified'
-                   ORDER BY created_at DESC LIMIT ?""",
-                (str(session_id), limit),
-            ).fetchall()
+                   ORDER BY created_at DESC"""
+        parameters: tuple[Any, ...] = (str(session_id),)
+        if limit is not None:
+            query += " LIMIT ?"
+            parameters += (limit,)
+        with self.connect() as db:
+            rows = db.execute(query, parameters).fetchall()
         return [
             {
                 "id": row["id"],
@@ -389,14 +393,18 @@ class PostgresCatalog:
             ).fetchone()
         return dict(row) if row else None
 
-    def list_answer_history(self, session_id: UUID, limit: int) -> list[dict[str, Any]]:
-        with self.connect() as db:
-            rows = db.execute(
-                """SELECT id, details, created_at FROM audit_log
+    def list_answer_history(
+        self, session_id: UUID, limit: int | None = None
+    ) -> list[dict[str, Any]]:
+        query = """SELECT id, details, created_at FROM audit_log
                    WHERE session_id = %s AND event = 'answer_verified'
-                   ORDER BY created_at DESC LIMIT %s""",
-                (session_id, limit),
-            ).fetchall()
+                   ORDER BY created_at DESC"""
+        parameters: tuple[Any, ...] = (session_id,)
+        if limit is not None:
+            query += " LIMIT %s"
+            parameters += (limit,)
+        with self.connect() as db:
+            rows = db.execute(query, parameters).fetchall()
         return [
             {
                 "id": str(row["id"]),

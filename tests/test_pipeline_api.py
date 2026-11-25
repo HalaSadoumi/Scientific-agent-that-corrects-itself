@@ -82,6 +82,17 @@ def test_image_ocr_uses_explicit_tesseract_path(tmp_path, monkeypatch) -> None:
     assert "NGC 1300" in parsed.pages[0].text
 
 
+def test_tesseract_discovers_common_windows_user_install(tmp_path, monkeypatch) -> None:
+    local_app_data = tmp_path / "LocalAppData"
+    executable = local_app_data / "Programs" / "Tesseract-OCR" / "tesseract.exe"
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
+    monkeypatch.setattr(pipeline.shutil, "which", lambda _: None)
+
+    assert pipeline._tesseract_command() == str(executable)
+
+
 def test_upload_is_indexed_and_retrieval_is_session_scoped(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         main,
@@ -153,6 +164,7 @@ def test_upload_is_indexed_and_retrieval_is_session_scoped(tmp_path, monkeypatch
 
 
 def test_image_is_stored_without_claiming_ocr(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(pipeline, "_tesseract_command", lambda configured=None: None)
     monkeypatch.setattr(
         main,
         "get_settings",
@@ -326,6 +338,36 @@ def test_answer_checks_generated_citations_and_records_audit(tmp_path, monkeypat
     )
     assert failed_answer.status_code == 502
     assert "HTTP 429: quota exceeded" in failed_answer.json()["detail"]
+
+
+def test_history_returns_all_saved_answers_by_default(tmp_path, monkeypatch) -> None:
+    database = tmp_path / "catalog.sqlite3"
+    catalog = Catalog(database)
+    monkeypatch.setattr(main, "_catalog", lambda: Catalog(database))
+    session = uuid4()
+    details = {
+        "question": "A saved question",
+        "segments": [],
+        "sources": {},
+        "generation_model": "writer",
+        "verification_model": "checker",
+    }
+    for index in range(55):
+        catalog.add_audit(
+            session,
+            "answer_verified",
+            details,
+            f"2026-01-01T00:00:{index:02d}+00:00",
+        )
+
+    response = TestClient(app).get(f"/sessions/{session}/history")
+    limited_response = TestClient(app).get(
+        f"/sessions/{session}/history", params={"limit": 1}
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 55
+    assert len(limited_response.json()["items"]) == 1
 
 
 def test_scholarly_search_marks_results_as_scholarly(monkeypatch) -> None:

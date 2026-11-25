@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import os
 import re
 import shutil
 import subprocess
@@ -34,10 +35,24 @@ class TextChunk:
 
 
 def _tesseract_command(configured: str | None = None) -> str | None:
-    """Resolve PATH installs and an optional explicit executable path."""
-    if configured and Path(configured).is_file():
-        return configured
-    return shutil.which(configured or "tesseract")
+    """Resolve configured, PATH, and common Windows installations."""
+    if configured:
+        configured_path = Path(configured).expanduser()
+        if configured_path.is_file():
+            return str(configured_path)
+    command = shutil.which(configured or "tesseract")
+    if command:
+        return command
+
+    candidates = []
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        candidates.append(Path(local_app_data) / "Programs" / "Tesseract-OCR" / "tesseract.exe")
+    for variable in ("ProgramFiles", "ProgramFiles(x86)"):
+        program_files = os.environ.get(variable)
+        if program_files:
+            candidates.append(Path(program_files) / "Tesseract-OCR" / "tesseract.exe")
+    return next((str(path) for path in candidates if path.is_file()), None)
 
 
 SUPPORTED_TYPES: dict[str, str] = {

@@ -17,7 +17,7 @@ This repository implements a configurable evidence pipeline: **input → ingesti
 
 API details are available at `/docs` when the server is running.
 
-For manual ingestion and retrieval checks, open `http://127.0.0.1:8000/`. The dashboard has Chat, History, Pipeline, Metrics, Graph, Evidence, and Policy views. It keeps a session ID in the browser, uploads files through the same API endpoint, and shows answer claims with citations and verifier verdicts. The History view lists saved questions and verified results for the current session.
+For manual ingestion and retrieval checks, open `http://127.0.0.1:8000/`. The dashboard has Chat, History, Pipeline, Metrics, Graph, Evidence, and Policy views. It keeps a session ID in the browser, uploads files through the same API endpoint, and shows answer claims with citations and verifier verdicts. The History view lists every saved verified answer for the current session; the catalog and session ID persist across API restarts.
 
 ## Local setup
 
@@ -29,6 +29,7 @@ uv run uvicorn agent.api.main:app --app-dir src --reload
 ```
 
 The simplest setup needs no containers: SQLite and local file storage are the defaults. Uploaded originals and the catalog are written beneath `data/`.
+The project reads its `.env` and resolves relative data paths from the project directory, so restarting or launching from another working directory uses the same OCR settings and persistent catalog.
 
 To enable the free local AstroBERT encoder and Neo4j support, install their optional packages:
 
